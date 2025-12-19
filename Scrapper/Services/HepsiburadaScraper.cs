@@ -1,4 +1,4 @@
-ï»¿using HtmlAgilityPack;
+using HtmlAgilityPack;
 using Scrapper.Models;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -8,15 +8,15 @@ using OpenQA.Selenium.Support.UI;
 
 namespace Scrapper.Services;
 
-public class TrendyolScraper : IDisposable
+public class HepsiburadaScraper : IDisposable
 {
     private readonly HttpClient _httpClient;
     private IWebDriver? _driver;
     private readonly ScrapeDoService? _scrapeDoService;
-    private const string BaseUrl = "https://www.trendyol.com";
+    private const string BaseUrl = "https://www.hepsiburada.com";
     public ScrapeMethod Method { get; set; } = ScrapeMethod.Selenium;
 
-    public TrendyolScraper()
+    public HepsiburadaScraper()
     {
         _httpClient = new HttpClient();
         _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
@@ -47,7 +47,7 @@ public class TrendyolScraper : IDisposable
     {
         if (Method == ScrapeMethod.ScrapeDo)
         {
-            return await _scrapeDoService!.GetProductLinksAsync(categoryUrl);
+            return await _scrapeDoService!.GetProductLinksAsync(categoryUrl, isHepsiburada: true);
         }
 
         var productLinks = new List<string>();
@@ -58,36 +58,84 @@ public class TrendyolScraper : IDisposable
             _driver!.Navigate().GoToUrl(categoryUrl);
             
             var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(15));
-            wait.Until(d => d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0);
+            
+            try
+            {
+                wait.Until(d => d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0);
+            }
+            catch { }
             
             // Optimized scrolling with reduced delays
             for (int i = 0; i < 5; i++)
             {
                 ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
-                await Task.Delay(300); // Reduced from 500ms
+                await Task.Delay(500);
             }
-
-            var linkElements = _driver.FindElements(By.CssSelector("a[href*='-p-']"));
             
-            foreach (var element in linkElements)
+            await Task.Delay(1000);
+
+            var allLinks = _driver.FindElements(By.TagName("a"));
+            
+            foreach (var link in allLinks)
             {
                 try
                 {
-                    var href = element.GetAttribute("href");
-                    if (!string.IsNullOrEmpty(href) && href.Contains("-p-"))
+                    var href = link.GetAttribute("href");
+                    if (!string.IsNullOrEmpty(href) && href.Contains("-p-") && href.Contains("hepsiburada.com"))
                     {
-                        var fullUrl = href.StartsWith("http") ? href : BaseUrl + href;
-                        var cleanUrl = fullUrl.Split('?')[0];
-                        
-                        if (!productLinks.Contains(cleanUrl))
+                        // Skip "Sana özel seçimler" (personalized recommendations)
+                        // These are in a banner section, not real search results
+                        try
                         {
-                            productLinks.Add(cleanUrl);
+                            var jsExecutor = (IJavaScriptExecutor)_driver;
+                            var isInBanner = jsExecutor.ExecuteScript(@"
+                                var el = arguments[0];
+                                while (el) {
+                                    var className = el.className || '';
+                                    var id = el.id || '';
+                                    // Check if in ProductsBanner or recommendation section
+                                    if (className.includes('ProductsBanner') || 
+                                        className.includes('productsBanner') ||
+                                        id.includes('ProductsBanner') ||
+                                        className.includes('seçimler') ||
+                                        className.includes('özel')) {
+                                        return true;
+                                    }
+                                    el = el.parentElement;
+                                }
+                                return false;
+                            ", link);
+                            
+                            if (isInBanner != null && (bool)isInBanner)
+                            {
+                                continue; // Skip this link
+                            }
+                        }
+                        catch { }
+                        
+                        var cleanUrl = href.Split('?')[0];
+                        
+                        if (Regex.IsMatch(cleanUrl, @"-p-[A-Z0-9]+$"))
+                        {
+                            if (!productLinks.Contains(cleanUrl))
+                            {
+                                productLinks.Add(cleanUrl);
+                                
+                                // Performance optimization: Stop if we have enough links
+                                // Add buffer for potential failed scrapes
+                                // This avoids processing hundreds of links when only 5 are needed
+                                if (productLinks.Count >= 100)
+                                {
+                                    Console.WriteLine($"Collected sufficient product links ({productLinks.Count}), stopping early...");
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
                 catch { }
             }
-
+            
             Console.WriteLine($"Found {productLinks.Count} product links");
         }
         catch (Exception ex)
@@ -110,22 +158,22 @@ public class TrendyolScraper : IDisposable
                 html = await _scrapeDoService!.GetPageHtmlAsync(productUrl);
                 htmlDoc = new HtmlDocument();
                 htmlDoc.LoadHtml(html);
-                await Task.Delay(300); // Reduced from 500ms
+                await Task.Delay(300);
             }
             else
             {
                 InitializeDriver();
                 _driver!.Navigate().GoToUrl(productUrl);
                 
-                var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(8)); // Reduced from 10s
+                var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(8));
                 
                 try
                 {
-                    wait.Until(d => d.FindElements(By.CssSelector(".attribute-item")).Count > 0);
+                    wait.Until(d => d.FindElements(By.CssSelector("h1, .product-name")).Count > 0);
                 }
                 catch { }
                 
-                await Task.Delay(700); // Reduced from 1000ms
+                await Task.Delay(700);
 
                 html = _driver.PageSource;
                 htmlDoc = new HtmlDocument();
@@ -134,38 +182,57 @@ public class TrendyolScraper : IDisposable
 
             var product = new ProductInfo { ProductUrl = productUrl };
             
-            // EXTRACT PRODUCT NAME & BRAND
+            // EXTRACT PRODUCT NAME
             try
             {
-                var h1Node = htmlDoc.DocumentNode.SelectSingleNode("//h1[contains(@class, 'pr-new-br') or contains(@class, 'product-title')]");
-                if (h1Node != null)
+                var nameSelectors = new[] { "//h1[@id='product-name']", "//h1[contains(@class, 'product-name')]", "//h1" };
+                foreach (var selector in nameSelectors)
                 {
-                    product.Name = h1Node.InnerText.Trim();
-                    
-                    var brandStrong = h1Node.SelectSingleNode(".//strong");
-                    if (brandStrong != null)
+                    var node = htmlDoc.DocumentNode.SelectSingleNode(selector);
+                    if (node != null && !string.IsNullOrWhiteSpace(node.InnerText))
                     {
-                        product.Brand = brandStrong.InnerText.Trim();
+                        product.Name = node.InnerText.Trim();
+                        break;
+                    }
+                }
+            }
+            catch { }
+
+            // EXTRACT BRAND
+            try
+            {
+                var brandSelectors = new[] { "//span[contains(@class, 'brand')]", "//a[contains(@class, 'brand')]" };
+                foreach (var selector in brandSelectors)
+                {
+                    var node = htmlDoc.DocumentNode.SelectSingleNode(selector);
+                    if (node != null && !string.IsNullOrWhiteSpace(node.InnerText))
+                    {
+                        product.Brand = node.InnerText.Trim();
+                        break;
                     }
                 }
                 
-                if (string.IsNullOrEmpty(product.Name))
+                if (string.IsNullOrEmpty(product.Brand))
                 {
-                    var nameSelectors = new[] { "//h1", "//span[@class='product-name']", "//div[@class='product-name-container']//h1" };
-                    foreach (var selector in nameSelectors)
+                    var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'brand')]");
+                    if (scriptNodes != null)
                     {
-                        var node = htmlDoc.DocumentNode.SelectSingleNode(selector);
-                        if (node != null && !string.IsNullOrWhiteSpace(node.InnerText))
+                        foreach (var scriptNode in scriptNodes)
                         {
-                            product.Name = node.InnerText.Trim();
-                            break;
+                            var scriptText = scriptNode.InnerText;
+                            var brandMatch = Regex.Match(scriptText, @"""brand"":\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                            if (brandMatch.Success)
+                            {
+                                product.Brand = brandMatch.Groups[1].Value;
+                                break;
+                            }
                         }
                     }
                 }
             }
             catch { }
 
-            // EXTRACT PRICES
+            // EXTRACT PRICE
             try
             {
                 if (Method == ScrapeMethod.Selenium && _driver != null)
@@ -173,31 +240,16 @@ public class TrendyolScraper : IDisposable
                     try
                     {
                         var jsExecutor = (IJavaScriptExecutor)_driver!;
-                        var cartPrice = jsExecutor.ExecuteScript(@"
-                            var priceElements = Array.from(document.querySelectorAll('*'));
-                            var sepetteElement = priceElements.find(el => 
-                                el.textContent.includes('Sepette') && 
-                                el.textContent.match(/[\d.,]+\s*TL/)
-                            );
-                            
-                            if (sepetteElement) {
-                                var match = sepetteElement.textContent.match(/([\d.,]+)\s*TL/);
-                                if (match) return match[1] + ' TL';
-                            }
-                            
-                            var priceBox = document.querySelector('[class*=""prc-box""]');
-                            if (priceBox) {
-                                var discounted = priceBox.querySelector('[class*=""prc-dsc""]');
-                                var single = priceBox.querySelector('[class*=""prc-slg""]');
-                                if (discounted) return discounted.textContent.trim();
-                                if (single) return single.textContent.trim();
-                            }
-                            return '';
+                        var priceData = jsExecutor.ExecuteScript(@"
+                            var priceElem = document.querySelector('[data-bind=""markupText:'currentPriceBeforePoint'""]') || 
+                                           document.querySelector('.price-value') ||
+                                           document.querySelector('[itemprop=""price""]');
+                            return priceElem ? priceElem.textContent.trim() : '';
                         ");
                         
-                        if (cartPrice != null && !string.IsNullOrWhiteSpace(cartPrice.ToString()))
+                        if (priceData != null && !string.IsNullOrWhiteSpace(priceData.ToString()))
                         {
-                            product.DiscountedPrice = CleanPrice(cartPrice.ToString()!);
+                            product.DiscountedPrice = CleanPrice(priceData.ToString()!);
                         }
                     }
                     catch { }
@@ -205,49 +257,19 @@ public class TrendyolScraper : IDisposable
                 
                 if (string.IsNullOrEmpty(product.DiscountedPrice))
                 {
-                    var allElements = htmlDoc.DocumentNode.SelectNodes("//*[contains(text(), 'Sepette')]");
-                    if (allElements != null)
+                    var priceSelectors = new[] {
+                        "//span[@data-bind=\"markupText:'currentPriceBeforePoint'\"]",
+                        "//span[@itemprop='price']",
+                        "//*[contains(@class, 'price-value')]"
+                    };
+
+                    foreach (var selector in priceSelectors)
                     {
-                        foreach (var elem in allElements)
+                        var node = htmlDoc.DocumentNode.SelectSingleNode(selector);
+                        if (node != null && !string.IsNullOrWhiteSpace(node.InnerText))
                         {
-                            var text = elem.InnerText;
-                            if (text.Contains("Sepette") && text.Contains("TL"))
-                            {
-                                var match = Regex.Match(text, @"([\d.,]+)\s*TL");
-                                if (match.Success)
-                                {
-                                    product.DiscountedPrice = match.Groups[1].Value + " TL";
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    if (string.IsNullOrEmpty(product.DiscountedPrice))
-                    {
-                        var priceBox = htmlDoc.DocumentNode.SelectSingleNode("//div[contains(@class, 'prc-box')]");
-                        if (priceBox != null)
-                        {
-                            var originalPrice = priceBox.SelectSingleNode(".//span[contains(@class, 'prc-org')]");
-                            if (originalPrice != null)
-                            {
-                                product.Price = CleanPrice(originalPrice.InnerText);
-                            }
-                            
-                            var discountedPrice = priceBox.SelectSingleNode(".//span[contains(@class, 'prc-dsc')]");
-                            if (discountedPrice != null)
-                            {
-                                product.DiscountedPrice = CleanPrice(discountedPrice.InnerText);
-                            }
-                            
-                            if (string.IsNullOrEmpty(product.DiscountedPrice))
-                            {
-                                var singlePrice = priceBox.SelectSingleNode(".//span[contains(@class, 'prc-slg')]");
-                                if (singlePrice != null)
-                                {
-                                    product.DiscountedPrice = CleanPrice(singlePrice.InnerText);
-                                }
-                            }
+                            product.DiscountedPrice = CleanPrice(node.InnerText);
+                            break;
                         }
                     }
                 }
@@ -257,13 +279,7 @@ public class TrendyolScraper : IDisposable
             // EXTRACT SELLER
             try
             {
-                var sellerSelectors = new[]
-                {
-                    "//a[contains(@class, 'merchant-info-account')]",
-                    "//a[contains(@class, 'merchant')]",
-                    "//a[contains(@href, '/magaza/')]"
-                };
-
+                var sellerSelectors = new[] { "//a[contains(@class, 'merchant')]", "//span[contains(@class, 'seller-name')]" };
                 foreach (var selector in sellerSelectors)
                 {
                     var node = htmlDoc.DocumentNode.SelectSingleNode(selector);
@@ -276,7 +292,7 @@ public class TrendyolScraper : IDisposable
             }
             catch { }
 
-            // EXTRACT IMAGE
+            // EXTRACT IMAGES
             try
             {
                 var allImages = new List<string>();
@@ -288,7 +304,7 @@ public class TrendyolScraper : IDisposable
                         var jsExecutor = (IJavaScriptExecutor)_driver!;
                         var imageUrls = jsExecutor.ExecuteScript(@"
                             var images = [];
-                            document.querySelectorAll('[class*=""gallery""] img, [class*=""product-image""] img, img[src*=""productimages""]').forEach(img => {
+                            document.querySelectorAll('[class*=""gallery""] img, [class*=""product-image""] img').forEach(img => {
                                 var src = img.src || img.getAttribute('data-src') || '';
                                 if (src && !images.includes(src)) {
                                     images.push(src);
@@ -318,7 +334,7 @@ public class TrendyolScraper : IDisposable
                 
                 if (allImages.Count == 0)
                 {
-                    var imageSelectors = new[] { "//img[contains(@src, 'productimages')]", "//div[contains(@class, 'gallery')]//img" };
+                    var imageSelectors = new[] { "//img[contains(@class, 'product-image')]", "//div[contains(@class, 'gallery')]//img" };
                     foreach (var selector in imageSelectors)
                     {
                         var nodes = htmlDoc.DocumentNode.SelectNodes(selector);
@@ -357,12 +373,12 @@ public class TrendyolScraper : IDisposable
             // EXTRACT CATEGORY
             try
             {
-                var breadcrumbNodes = htmlDoc.DocumentNode.SelectNodes("//div[contains(@class, 'breadcrumb')]//a | //nav//ol//a");
+                var breadcrumbNodes = htmlDoc.DocumentNode.SelectNodes("//ol[contains(@class, 'breadcrumb')]//a");
                 if (breadcrumbNodes != null && breadcrumbNodes.Count > 0)
                 {
                     var categories = breadcrumbNodes
                         .Select(n => n.InnerText.Trim())
-                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                        .Where(s => !string.IsNullOrWhiteSpace(s) && s != "Ana Sayfa")
                         .ToList();
                     
                     if (categories.Count > 0)
@@ -373,7 +389,7 @@ public class TrendyolScraper : IDisposable
             }
             catch { }
 
-            // EXTRACT DESCRIPTION - Simplified to fastest method first
+            // EXTRACT DESCRIPTION - Simplified
             try
             {
                 var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'description')]");
@@ -402,32 +418,32 @@ public class TrendyolScraper : IDisposable
             // EXTRACT BARCODE - Simplified
             try
             {
-                var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'barcode')]");
-                if (scriptNodes != null)
+                var stockCodePatterns = new[] { "//*[contains(text(), 'Stok Kodu')]", "//*[contains(text(), 'Barkod')]" };
+                foreach (var pattern in stockCodePatterns)
                 {
-                    foreach (var scriptNode in scriptNodes)
+                    var nodes = htmlDoc.DocumentNode.SelectNodes(pattern);
+                    if (nodes != null)
                     {
-                        var scriptText = scriptNode.InnerText;
-                        var jsonMatch = Regex.Match(scriptText, @"""(?:barcode|barkod)"":\s*""(\d{8,})""", RegexOptions.IgnoreCase);
-                        if (jsonMatch.Success)
+                        foreach (var node in nodes)
                         {
-                            product.Barcode = jsonMatch.Groups[1].Value;
-                            break;
+                            var text = node.InnerText.Trim();
+                            var match = Regex.Match(text, @"(?:Stok Kodu|Barkod)[:\s]+([A-Z0-9]+)", RegexOptions.IgnoreCase);
+                            if (match.Success)
+                            {
+                                product.Barcode = match.Groups[1].Value;
+                                break;
+                            }
                         }
                     }
+                    
+                    if (!string.IsNullOrEmpty(product.Barcode))
+                        break;
                 }
             }
             catch { }
 
             // EXTRACT PRODUCT ATTRIBUTES
-            if (Method == ScrapeMethod.Selenium && _driver != null)
-            {
-                await ExtractAllProductAttributes(htmlDoc, _driver, product);
-            }
-            else
-            {
-                await ExtractAllProductAttributesHtmlOnly(htmlDoc, product);
-            }
+            await ExtractHepsiburadaAttributes(htmlDoc, product);
 
             return product;
         }
@@ -439,110 +455,111 @@ public class TrendyolScraper : IDisposable
         return null;
     }
 
-    private async Task ExtractAllProductAttributesHtmlOnly(HtmlDocument htmlDoc, ProductInfo product)
+    private async Task ExtractHepsiburadaAttributes(HtmlDocument htmlDoc, ProductInfo product)
     {
-        var attributeItems = htmlDoc.DocumentNode.SelectNodes("//div[contains(@class, 'attribute-item')]");
-        
-        if (attributeItems != null && attributeItems.Count > 0)
+        try
         {
-            foreach (var item in attributeItems)
+            // Trigger lazy loading if using Selenium
+            if (Method == ScrapeMethod.Selenium && _driver != null)
             {
                 try
                 {
-                    var nameDiv = item.SelectSingleNode(".//div[contains(@class, 'name')]");
-                    var valueDiv = item.SelectSingleNode(".//div[contains(@class, 'value')]");
+                    var jsExecutor = (IJavaScriptExecutor)_driver;
+                    jsExecutor.ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
+                    await Task.Delay(700);
                     
-                    if (nameDiv != null && valueDiv != null)
-                    {
-                        var key = nameDiv.InnerText.Trim();
-                        var value = valueDiv.InnerText.Trim();
-                        
-                        if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
-                        {
-                            product.Attributes[key] = value;
-                        }
-                    }
+                    jsExecutor.ExecuteScript(@"
+                        var sections = document.querySelectorAll('section[data-hydration-on-demand]');
+                        sections.forEach(function(section) {
+                            section.style.display = 'block';
+                            section.setAttribute('data-hydration-on-demand', 'false');
+                        });
+                    ");
+                    
+                    await Task.Delay(1000);
+                    
+                    var updatedHtml = _driver.PageSource;
+                    htmlDoc = new HtmlDocument();
+                    htmlDoc.LoadHtml(updatedHtml);
                 }
                 catch { }
             }
-        }
-        
-        await Task.CompletedTask;
-    }
+            
+            // Try table selectors
+            var attributeSelectors = new[]
+            {
+                "//table//tr[.//td[2]]",
+                "//section[contains(@class, 'product')]//table//tr",
+                "//div[contains(@class, 'product-detail')]//table//tr"
+            };
 
-    private async Task ExtractAllProductAttributes(HtmlDocument htmlDoc, IWebDriver driver, ProductInfo product)
-    {
-        var attributeItems = htmlDoc.DocumentNode.SelectNodes("//div[contains(@class, 'attribute-item')]");
-        
-        if (attributeItems != null && attributeItems.Count > 0)
-        {
-            foreach (var item in attributeItems)
+            bool found = false;
+            foreach (var selector in attributeSelectors)
             {
-                try
-                {
-                    var nameDiv = item.SelectSingleNode(".//div[contains(@class, 'name')]");
-                    var valueDiv = item.SelectSingleNode(".//div[contains(@class, 'value')]");
-                    
-                    if (nameDiv != null && valueDiv != null)
-                    {
-                        var key = nameDiv.InnerText.Trim();
-                        var value = valueDiv.InnerText.Trim();
-                        
-                        if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
-                        {
-                            product.Attributes[key] = value;
-                        }
-                    }
-                }
-                catch { }
-            }
-        }
-        else
-        {
-            try
-            {
-                var jsExecutor = (IJavaScriptExecutor)driver;
-                var jsData = jsExecutor.ExecuteScript(@"
-                    var attrs = [];
-                    document.querySelectorAll('.attribute-item').forEach(item => {
-                        var name = item.querySelector('.name');
-                        var value = item.querySelector('.value');
-                        if (name && value) {
-                            attrs.push({
-                                key: name.textContent.trim(),
-                                value: value.textContent.trim()
-                            });
-                        }
-                    });
-                    return JSON.stringify(attrs);
-                ");
+                var attributeRows = htmlDoc.DocumentNode.SelectNodes(selector);
                 
-                if (jsData != null)
+                if (attributeRows != null && attributeRows.Count > 0)
                 {
-                    using var doc = JsonDocument.Parse(jsData.ToString());
-                    var root = doc.RootElement;
-                    
-                    if (root.ValueKind == JsonValueKind.Array)
+                    foreach (var row in attributeRows)
                     {
-                        foreach (var attr in root.EnumerateArray())
+                        try
                         {
-                            if (attr.TryGetProperty("key", out var keyElem) && 
-                                attr.TryGetProperty("value", out var valueElem))
+                            var cells = row.SelectNodes(".//td");
+                            if (cells != null && cells.Count >= 2)
                             {
-                                var key = keyElem.GetString();
-                                var value = valueElem.GetString();
+                                var key = Regex.Replace(cells[0].InnerText.Trim(), @"\s+", " ");
+                                var value = Regex.Replace(cells[1].InnerText.Trim(), @"\s+", " ");
                                 
-                                if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(value))
+                                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
                                 {
                                     product.Attributes[key] = value;
                                 }
                             }
                         }
+                        catch { }
+                    }
+                    
+                    if (product.Attributes.Count > 0)
+                    {
+                        found = true;
+                        break;
                     }
                 }
             }
-            catch { }
+            
+            // Try definition lists if tables didn't work
+            if (!found)
+            {
+                var dtElements = htmlDoc.DocumentNode.SelectNodes("//dt");
+                if (dtElements != null)
+                {
+                    foreach (var dt in dtElements)
+                    {
+                        try
+                        {
+                            var dd = dt.NextSibling;
+                            while (dd != null && dd.Name != "dd")
+                            {
+                                dd = dd.NextSibling;
+                            }
+                            
+                            if (dd != null)
+                            {
+                                var key = Regex.Replace(dt.InnerText.Trim(), @"\s+", " ");
+                                var value = Regex.Replace(dd.InnerText.Trim(), @"\s+", " ");
+                                
+                                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                                {
+                                    product.Attributes[key] = value;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
         }
+        catch { }
         
         await Task.CompletedTask;
     }
@@ -556,7 +573,7 @@ public class TrendyolScraper : IDisposable
         if (match.Success)
         {
             var numericValue = match.Value;
-            if (priceText.Contains("TL") || priceText.Contains("â‚º"))
+            if (priceText.Contains("TL") || priceText.Contains("?"))
                 return numericValue + " TL";
             return numericValue + " TL";
         }
@@ -581,7 +598,7 @@ public class TrendyolScraper : IDisposable
                 products.Add(product);
             }
             
-            await Task.Delay(300); // Reduced from 500ms
+            await Task.Delay(300);
         }
 
         return products;

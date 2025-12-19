@@ -1,9 +1,8 @@
-﻿using Scrapper.Models;
-using System.Net.Http;
+using Scrapper.Models;
 
 namespace Scrapper.Services;
 
-public class TrendyolScraperService
+public class HepsiburadaScraperService
 {
     public async Task ScrapeWithProgressAsync(
         string categoryUrl,
@@ -18,7 +17,7 @@ public class TrendyolScraperService
             var methodName = scrapeMethod == ScrapeMethod.ScrapeDo ? "Scrape.do API" : "Selenium";
             await onProgress(0, $"Initializing scraper ({methodName})...", "info");
             
-            using var scraper = new TrendyolScraper();
+            using var scraper = new HepsiburadaScraper();
             scraper.Method = scrapeMethod;
             
             await onProgress(5, "Fetching product links...", "info");
@@ -51,24 +50,22 @@ public class TrendyolScraperService
                         ? product.Name.Substring(0, 50) + "..." 
                         : product.Name ?? "Unknown Product";
                     
-                    // Show attribute count in progress
                     var attrInfo = product.Attributes.Count > 0 ? $" ({product.Attributes.Count} attributes)" : "";
                     await onProgress(
                         (int)currentProgress,
-                        $"✓ {displayName}{attrInfo}",
+                        $"? {displayName}{attrInfo}",
                         "success"
                     );
                 }
                 
                 currentProgress += progressPerProduct;
-                // Reduced delay for faster scraping
                 await Task.Delay(200);
             }
             
             // Image Processing Step
             if (processImages && products.Count > 0)
             {
-                await onProgress((int)currentProgress, "🖼️ Processing and uploading images to CDN...", "info");
+                await onProgress((int)currentProgress, "??? Processing and uploading images to CDN...", "info");
                 
                 var ftpConfig = new CdnFtpConfig();
                 var ftpService = new FtpUploadService(ftpConfig);
@@ -98,15 +95,14 @@ public class TrendyolScraperService
                     currentProgress += progressPerImage;
                 }
                 
-                await onProgress(90, $"✓ All images processed and uploaded to CDN!", "success");
+                await onProgress(90, $"? All images processed and uploaded to CDN!", "success");
             }
             
             var finalProgress = processImages ? 90 : 90;
             await onProgress(finalProgress, $"Scraped {products.Count} products. Creating Excel file...", "info");
             
-            // Create Excel file
             var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var fileName = $"TrendyolProducts_{timestamp}.xlsx";
+            var fileName = $"HepsiburadaProducts_{timestamp}.xlsx";
             var filePath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
             
             try
@@ -114,19 +110,19 @@ public class TrendyolScraperService
                 var exporter = new ExcelExporter();
                 exporter.ExportToExcel(products, filePath, excludePrice, processImages);
                 
-                await onProgress(100, $"✓ Successfully scraped {products.Count} products!", "success");
+                await onProgress(100, $"? Successfully scraped {products.Count} products!", "success");
                 await SendComplete(onProgress, fileName, products.Count);
             }
             catch (Exception excelEx)
             {
-                await onProgress(100, $"✗ Error creating Excel file: {excelEx.Message}", "error");
+                await onProgress(100, $"? Error creating Excel file: {excelEx.Message}", "error");
                 Console.WriteLine($"Excel export error details: {excelEx}");
                 await SendComplete(onProgress, null, null);
             }
         }
         catch (Exception ex)
         {
-            await onProgress(100, $"✗ Error: {ex.Message}", "error");
+            await onProgress(100, $"? Error: {ex.Message}", "error");
             await SendComplete(onProgress, null, null);
         }
     }
@@ -142,7 +138,6 @@ public class TrendyolScraperService
         };
         
         var json = System.Text.Json.JsonSerializer.Serialize(data);
-        // Send as a message so it gets picked up by the progress handler
         await onProgress(100, json, "complete");
     }
 }

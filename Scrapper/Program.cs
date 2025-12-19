@@ -4,6 +4,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services
 builder.Services.AddSingleton<TrendyolScraperService>();
+builder.Services.AddSingleton<HepsiburadaScraperService>();
 
 var app = builder.Build();
 
@@ -193,14 +194,34 @@ app.MapGet("/", () => Results.Content("""
         .example strong {
             color: #667eea;
         }
+        
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🛍️ Scrapper</h1>
-        <p class="subtitle">Extract product data from categories</p>
+        <p class="subtitle">Extract product data from Trendyol or Hepsiburada</p>
         
         <form id="scraperForm">
+            <div class="form-group">
+                <label for="platform">Platform</label>
+                <select 
+                    id="platform" 
+                    name="platform"
+                    style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;"
+                    onchange="updateExample()"
+                >
+                    <option value="trendyol">Trendyol</option>
+                    <option value="hepsiburada">Hepsiburada</option>
+                </select>
+                <div class="input-hint">Choose which platform to scrape</div>
+            </div>
+            
             <div class="form-group">
                 <label for="categoryUrl">Category URL</label>
                 <input 
@@ -229,18 +250,43 @@ app.MapGet("/", () => Results.Content("""
             </div>
             
             <div class="form-group">
-                <label>
+                <label for="scrapeMethod">Scraping Method</label>
+                <select 
+                    id="scrapeMethod" 
+                    name="scrapeMethod"
+                    style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;"
+                >
+                    <option value="Selenium">Selenium (Original - Free)</option>
+                    <option value="ScrapeDo">Scrape.do API (Fast - Paid)</option>
+                </select>
+                <div class="input-hint">Selenium is free but slower. Scrape.do is faster but uses API credits.</div>
+            </div>
+            
+            <div class="form-group">
+                <div class="checkbox-label">
                     <input 
                         type="checkbox" 
                         id="excludePrice" 
                         name="excludePrice"
                         style="width: auto; margin-right: 8px;"
                     >
-                    Exclude Price from Excel
-                </label>
+                    <label for="excludePrice" style="margin: 0;">Exclude Price from Excel</label>
+                </div>
+                
+                <div class="checkbox-label">
+                    <input 
+                        type="checkbox" 
+                        id="processImages" 
+                        name="processImages"
+                        checked
+                        style="width: auto; margin-right: 8px;"
+                    >
+                    <label for="processImages" style="margin: 0;">Process & Upload Images to CDN (1000x1000)</label>
+                </div>
+                <div class="input-hint">Resize images to 1000x1000 and upload to CDN (increases scraping time)</div>
             </div>
             
-            <div class="example">
+            <div class="example" id="exampleUrls">
                 <strong>Example URLs:</strong><br>
                 • Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122<br>
                 • Skincare: https://www.trendyol.com/cilt-bakimi-x-c1121<br>
@@ -259,6 +305,32 @@ app.MapGet("/", () => Results.Content("""
     </div>
     
     <script>
+        function updateExample() {
+            const platform = document.getElementById('platform').value;
+            const exampleUrls = document.getElementById('exampleUrls');
+            const categoryUrl = document.getElementById('categoryUrl');
+            
+            if (platform === 'hepsiburada') {
+                exampleUrls.innerHTML = `
+                    <strong>Example URLs (Hepsiburada):</strong><br>
+                    • Tablets: https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849<br>
+                    • Laptops: https://www.hepsiburada.com/laptop-notebook-dizustu-bilgisayarlar-c-98<br>
+                    • Phones: https://www.hepsiburada.com/cep-telefonlari-c-371965
+                `;
+                categoryUrl.placeholder = 'https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849';
+                categoryUrl.value = 'https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849';
+            } else {
+                exampleUrls.innerHTML = `
+                    <strong>Example URLs (Trendyol):</strong><br>
+                    • Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122<br>
+                    • Skincare: https://www.trendyol.com/cilt-bakimi-x-c1121<br>
+                    • Makeup: https://www.trendyol.com/makyaj-x-c1123
+                `;
+                categoryUrl.placeholder = 'https://www.trendyol.com/yuz-kremi-x-c1122';
+                categoryUrl.value = 'https://www.trendyol.com/yuz-kremi-x-c1122';
+            }
+        }
+        
         const form = document.getElementById('scraperForm');
         const startBtn = document.getElementById('startBtn');
         const progress = document.getElementById('progress');
@@ -268,9 +340,12 @@ app.MapGet("/", () => Results.Content("""
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            const platform = document.getElementById('platform').value;
             const categoryUrl = document.getElementById('categoryUrl').value;
             const maxProducts = document.getElementById('maxProducts').value;
             const excludePrice = document.getElementById('excludePrice').checked;
+            const processImages = document.getElementById('processImages').checked;
+            const scrapeMethod = document.getElementById('scrapeMethod').value;
             
             // Disable form
             startBtn.disabled = true;
@@ -285,9 +360,12 @@ app.MapGet("/", () => Results.Content("""
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
+                        platform: platform,
                         categoryUrl: categoryUrl,
                         maxProducts: parseInt(maxProducts),
-                        excludePrice: excludePrice
+                        excludePrice: excludePrice,
+                        processImages: processImages,
+                        scrapeMethod: scrapeMethod
                     })
                 });
                 
@@ -354,28 +432,60 @@ app.MapGet("/", () => Results.Content("""
 """, "text/html"));
 
 // API endpoint for scraping
-app.MapPost("/api/scrape", async (ScraperRequest request, TrendyolScraperService scraperService) =>
+app.MapPost("/api/scrape", async (ScraperRequest request, TrendyolScraperService trendyolService, HepsiburadaScraperService hepsiburadaService) =>
 {
     return Results.Stream(async (stream) =>
     {
         var writer = new StreamWriter(stream);
         
-        await scraperService.ScrapeWithProgressAsync(
-            request.CategoryUrl,
-            request.MaxProducts,
-            request.ExcludePrice,
-            async (progress, message, type) =>
-            {
-                var data = System.Text.Json.JsonSerializer.Serialize(new
+        // Parse scrape method from request
+        Scrapper.Models.ScrapeMethod scrapeMethod = request.ScrapeMethod.ToLower() == "scrapedo" 
+            ? Scrapper.Models.ScrapeMethod.ScrapeDo 
+            : Scrapper.Models.ScrapeMethod.Selenium;
+        
+        // Choose service based on platform
+        if (request.Platform.ToLower() == "hepsiburada")
+        {
+            await hepsiburadaService.ScrapeWithProgressAsync(
+                request.CategoryUrl,
+                request.MaxProducts,
+                request.ExcludePrice,
+                scrapeMethod,
+                request.ProcessImages,
+                async (progress, message, type) =>
                 {
-                    progress,
-                    message,
-                    type
-                });
-                await writer.WriteLineAsync($"data: {data}\n");
-                await writer.FlushAsync();
-            }
-        );
+                    var data = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        progress,
+                        message,
+                        type
+                    });
+                    await writer.WriteLineAsync($"data: {data}\n");
+                    await writer.FlushAsync();
+                }
+            );
+        }
+        else
+        {
+            await trendyolService.ScrapeWithProgressAsync(
+                request.CategoryUrl,
+                request.MaxProducts,
+                request.ExcludePrice,
+                scrapeMethod,
+                request.ProcessImages,
+                async (progress, message, type) =>
+                {
+                    var data = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        progress,
+                        message,
+                        type
+                    });
+                    await writer.WriteLineAsync($"data: {data}\n");
+                    await writer.FlushAsync();
+                }
+            );
+        }
     }, "text/event-stream");
 });
 
@@ -398,4 +508,4 @@ Console.WriteLine("Press Ctrl+C to stop the server");
 
 app.Run("http://localhost:5000");
 
-public record ScraperRequest(string CategoryUrl, int MaxProducts, bool ExcludePrice);
+public record ScraperRequest(string Platform, string CategoryUrl, int MaxProducts, bool ExcludePrice, bool ProcessImages, string ScrapeMethod);

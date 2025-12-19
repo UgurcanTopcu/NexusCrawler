@@ -29,7 +29,7 @@ public class ScraperDebugger
         driver.Navigate().GoToUrl(productUrl);
 
         var wait = new WebDriverWait(driver, TimeSpan.FromSeconds(10));
-        await Task.Delay(3000); // Wait for page to fully load
+        await Task.Delay(1500); // Wait for page to fully load
 
         var html = driver.PageSource;
         var htmlDoc = new HtmlDocument();
