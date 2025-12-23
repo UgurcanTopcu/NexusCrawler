@@ -18,7 +18,7 @@ public class ImageProcessingService
         _ftpService = ftpService;
     }
 
-    public async Task<string?> ProcessAndUploadImageAsync(string imageUrl, string productName, int imageIndex = 0)
+    public async Task<string?> ProcessAndUploadImageAsync(string imageUrl, ProductInfo product, int imageIndex = 0)
     {
         try
         {
@@ -38,12 +38,15 @@ public class ImageProcessingService
                 return null;
             }
 
-            // 3. Storage Layer: Upload to FTP
-            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var safeProductName = SanitizeFileName(productName);
-            var fileName = $"{safeProductName}_{timestamp}_{imageIndex + 1}.jpg";
+            // 3. Storage Layer: Upload to FTP with site/productId structure
+            var fileName = $"image_{imageIndex + 1}.jpg";
             
-            var cdnUrl = await _ftpService.UploadImageAsync(resizedData, fileName);
+            var cdnUrl = await _ftpService.UploadImageAsync(
+                resizedData, 
+                fileName, 
+                product.Source, 
+                product.ProductId
+            );
             
             return cdnUrl;
         }
@@ -63,62 +66,122 @@ public class ImageProcessingService
 
         try
         {
+            // DIAGNOSTIC: Log product identification
+            Console.WriteLine($"\n[Image Processing] ========================================");
+            Console.WriteLine($"[Image Processing] Product: {product.Name}");
+            Console.WriteLine($"[Image Processing] Source: {product.Source}");
+            Console.WriteLine($"[Image Processing] ProductId: {product.ProductId}");
+            Console.WriteLine($"[Image Processing] ProductUrl: {product.ProductUrl}");
+            Console.WriteLine($"[Image Processing] ========================================");
+            
+            // Validate product identification BEFORE processing
+            if (string.IsNullOrEmpty(product.Source))
+            {
+                Console.WriteLine($"[Image Processing] ? ERROR: Product.Source is empty! Skipping upload.");
+                await (onProgressMessage?.Invoke("? Product source missing - skipping upload") ?? Task.CompletedTask);
+                return (null, new List<string>());
+            }
+            
+            if (string.IsNullOrEmpty(product.ProductId))
+            {
+                Console.WriteLine($"[Image Processing] ? ERROR: Product.ProductId is empty! Skipping upload.");
+                await (onProgressMessage?.Invoke("? Product ID missing - skipping upload") ?? Task.CompletedTask);
+                return (null, new List<string>());
+            }
+            
+            // **NEW: Check CDN cache first**
+            var cdnConfig = new CdnFtpConfig();
+            var cdnCache = new CdnCacheService(cdnConfig);  // Uses its own HttpClient now
+            
+            await (onProgressMessage?.Invoke($"?? Checking CDN cache for existing images...") ?? Task.CompletedTask);
+            
+            var (existingMain, existingAdditional) = await cdnCache.FindExistingImagesAsync(
+                product.Source, 
+                product.ProductId, 
+                maxImagesToCheck: 3  // Only check for 3 images
+            );
+            
+            if (existingMain != null)
+            {
+                await (onProgressMessage?.Invoke($"? Found {existingAdditional.Count + 1} existing images on CDN, skipping upload") ?? Task.CompletedTask);
+                Console.WriteLine($"[Image Processing] ? Using cached images for {product.Source}/{product.ProductId}");
+                return (existingMain, existingAdditional);
+            }
+            else
+            {
+                Console.WriteLine($"[Image Processing] No cached images found, proceeding with upload...");
+            }
+
             // Get all image URLs
             var allImageUrls = product.GetAllImages();
             
             if (allImageUrls.Count == 0)
             {
                 await (onProgressMessage?.Invoke("?? No images found for product") ?? Task.CompletedTask);
+                Console.WriteLine($"[Image Processing] ?? No images to process for product");
                 return (null, new List<string>());
             }
 
-            await (onProgressMessage?.Invoke($"??? Processing {allImageUrls.Count} images...") ?? Task.CompletedTask);
+            // ? LIMIT: Only process first 3 images (1 main + 2 additional)
+            const int MaxImagesToProcess = 3;
+            var imagesToProcess = allImageUrls.Take(MaxImagesToProcess).ToList();
+            
+            Console.WriteLine($"[Image Processing] Processing {imagesToProcess.Count} of {allImageUrls.Count} images for {product.Source}/{product.ProductId} (limited to {MaxImagesToProcess})");
+            await (onProgressMessage?.Invoke($"??? Processing {imagesToProcess.Count} images...") ?? Task.CompletedTask);
 
             int successCount = 0;
             int failCount = 0;
 
             // Process main image
-            if (allImageUrls.Count > 0)
+            if (imagesToProcess.Count > 0)
             {
-                var cdnUrl = await ProcessAndUploadImageAsync(allImageUrls[0], product.Name, 0);
+                Console.WriteLine($"[Image Processing] Uploading main image (1/{imagesToProcess.Count})...");
+                var cdnUrl = await ProcessAndUploadImageAsync(imagesToProcess[0], product, 0);
                 if (!string.IsNullOrEmpty(cdnUrl))
                 {
                     mainImageUrl = cdnUrl;
                     successCount++;
+                    Console.WriteLine($"[Image Processing] ? Main image uploaded: {cdnUrl}");
                 }
                 else
                 {
                     failCount++;
+                    Console.WriteLine($"[Image Processing] ? Main image upload failed");
                 }
             }
 
-            // Process additional images
-            for (int i = 1; i < allImageUrls.Count; i++)
+            // Process additional images (up to 2 more)
+            for (int i = 1; i < imagesToProcess.Count; i++)
             {
-                var cdnUrl = await ProcessAndUploadImageAsync(allImageUrls[i], product.Name, i);
+                Console.WriteLine($"[Image Processing] Uploading additional image ({i + 1}/{imagesToProcess.Count})...");
+                var cdnUrl = await ProcessAndUploadImageAsync(imagesToProcess[i], product, i);
                 if (!string.IsNullOrEmpty(cdnUrl))
                 {
                     additionalImageUrls.Add(cdnUrl);
                     successCount++;
+                    Console.WriteLine($"[Image Processing] ? Additional image {i + 1} uploaded: {cdnUrl}");
                 }
                 else
                 {
                     failCount++;
+                    Console.WriteLine($"[Image Processing] ? Additional image {i + 1} upload failed");
                 }
             }
 
-            var statusMsg = $"? Uploaded {successCount}/{allImageUrls.Count} images to CDN";
+            var statusMsg = $"? Uploaded {successCount}/{imagesToProcess.Count} images to CDN";
             if (failCount > 0)
             {
                 statusMsg += $" ({failCount} failed)";
             }
+            Console.WriteLine($"[Image Processing] Summary: {statusMsg}");
             await (onProgressMessage?.Invoke(statusMsg) ?? Task.CompletedTask);
             
             return (mainImageUrl, additionalImageUrls);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error processing product images: {ex.Message}");
+            Console.WriteLine($"[Image Processing] ? EXCEPTION: {ex.Message}");
+            Console.WriteLine($"[Image Processing] Stack Trace: {ex.StackTrace}");
             return (null, new List<string>());
         }
     }

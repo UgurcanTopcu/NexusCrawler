@@ -10,6 +10,10 @@ public class ProductInfo
     public string ReviewCount { get; set; } = string.Empty;
     public string ProductUrl { get; set; } = string.Empty;
     
+    // Product identification
+    public string ProductId { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty; // "trendyol" or "hepsiburada"
+    
     // Original image URLs (from scraping)
     public string ImageUrl { get; set; } = string.Empty;
     public List<string> AdditionalImages { get; set; } = new List<string>();

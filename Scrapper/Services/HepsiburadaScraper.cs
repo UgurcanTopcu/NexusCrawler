@@ -55,92 +55,122 @@ public class HepsiburadaScraper : IDisposable
         try
         {
             InitializeDriver();
+            Console.WriteLine($"Navigating to: {categoryUrl}");
             _driver!.Navigate().GoToUrl(categoryUrl);
             
             var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(15));
             
             try
             {
-                wait.Until(d => d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0);
+                Console.WriteLine("Waiting for product cards to load...");
+                wait.Until(d => d.FindElements(By.CssSelector("[class*='productCardLink']")).Count > 0);
+                Console.WriteLine($"Initial load: Found {_driver.FindElements(By.CssSelector("[class*='productCardLink']")).Count} product cards");
             }
-            catch { }
+            catch 
+            {
+                Console.WriteLine("Warning: Timeout waiting for product cards");
+            }
             
-            // Optimized scrolling with reduced delays
-            for (int i = 0; i < 5; i++)
+            // Scroll to load more products
+            Console.WriteLine("Scrolling to load more products...");
+            for (int i = 0; i < 10; i++)
             {
                 ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
-                await Task.Delay(500);
+                await Task.Delay(800); // Increased from 500ms
+                Console.WriteLine($"Scroll {i + 1}/10 completed");
             }
             
-            await Task.Delay(1000);
+            await Task.Delay(1500); // Extra wait for final content to load
 
-            var allLinks = _driver.FindElements(By.TagName("a"));
+            Console.WriteLine("Extracting product links...");
+            // Use JavaScript to get all product card links more reliably
+            var jsExecutor = (IJavaScriptExecutor)_driver;
+            var productUrls = jsExecutor.ExecuteScript(@"
+                var links = [];
+                // Find all product card links
+                var productCardLinks = document.querySelectorAll('a[class*=""productCardLink""]');
+                console.log('Found ' + productCardLinks.length + ' product card links');
+                productCardLinks.forEach(function(link) {
+                    var href = link.href;
+                    if (href && href.includes('-p-')) {
+                        links.push(href);
+                    }
+                });
+                return links.join('|||');
+            ");
             
-            foreach (var link in allLinks)
+            if (productUrls != null && !string.IsNullOrWhiteSpace(productUrls.ToString()))
             {
-                try
+                var urls = productUrls.ToString()!.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
+                Console.WriteLine($"JavaScript extraction returned {urls.Length} URLs");
+                
+                foreach (var url in urls)
                 {
-                    var href = link.GetAttribute("href");
-                    if (!string.IsNullOrEmpty(href) && href.Contains("-p-") && href.Contains("hepsiburada.com"))
+                    var cleanUrl = url.Split('?')[0];
+                    
+                    // Hepsiburada pattern: ends with -pm-PRODUCTCODE or -p-PRODUCTCODE
+                    if (Regex.IsMatch(cleanUrl, @"-(pm|p)-[A-Z0-9]+$"))
                     {
-                        // Skip "Sana özel seçimler" (personalized recommendations)
-                        // These are in a banner section, not real search results
-                        try
+                        if (!productLinks.Contains(cleanUrl))
                         {
-                            var jsExecutor = (IJavaScriptExecutor)_driver;
-                            var isInBanner = jsExecutor.ExecuteScript(@"
-                                var el = arguments[0];
-                                while (el) {
-                                    var className = el.className || '';
-                                    var id = el.id || '';
-                                    // Check if in ProductsBanner or recommendation section
-                                    if (className.includes('ProductsBanner') || 
-                                        className.includes('productsBanner') ||
-                                        id.includes('ProductsBanner') ||
-                                        className.includes('seçimler') ||
-                                        className.includes('özel')) {
-                                        return true;
-                                    }
-                                    el = el.parentElement;
-                                }
-                                return false;
-                            ", link);
-                            
-                            if (isInBanner != null && (bool)isInBanner)
-                            {
-                                continue; // Skip this link
-                            }
+                            productLinks.Add(cleanUrl);
                         }
-                        catch { }
-                        
-                        var cleanUrl = href.Split('?')[0];
-                        
-                        if (Regex.IsMatch(cleanUrl, @"-p-[A-Z0-9]+$"))
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  Rejected (pattern mismatch): {cleanUrl}");
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine("ERROR: JavaScript extraction returned null or empty!");
+            }
+            
+            Console.WriteLine($"Found {productLinks.Count} unique product links");
+            
+            // Debug: Print first few links
+            if (productLinks.Count > 0)
+            {
+                Console.WriteLine("Sample product links:");
+                foreach (var link in productLinks.Take(5))
+                {
+                    Console.WriteLine($"  - {link}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("ERROR: No product links found!");
+                
+                // Emergency fallback: Try Selenium's FindElements
+                Console.WriteLine("Trying Selenium FindElements fallback...");
+                var linkElements = _driver.FindElements(By.CssSelector("a[class*='productCardLink']"));
+                Console.WriteLine($"Found {linkElements.Count} elements via Selenium");
+                
+                foreach (var element in linkElements.Take(10))
+                {
+                    try
+                    {
+                        var href = element.GetAttribute("href");
+                        Console.WriteLine($"  Element href: {href}");
+                        if (!string.IsNullOrEmpty(href) && href.Contains("-p-"))
                         {
-                            if (!productLinks.Contains(cleanUrl))
+                            var cleanUrl = href.Split('?')[0];
+                            // Hepsiburada pattern: ends with -pm-CODE or -p-CODE
+                            if (Regex.IsMatch(cleanUrl, @"-(pm|p)-[A-Z0-9]+$") && !productLinks.Contains(cleanUrl))
                             {
                                 productLinks.Add(cleanUrl);
-                                
-                                // Performance optimization: Stop if we have enough links
-                                // Add buffer for potential failed scrapes
-                                // This avoids processing hundreds of links when only 5 are needed
-                                if (productLinks.Count >= 100)
-                                {
-                                    Console.WriteLine($"Collected sufficient product links ({productLinks.Count}), stopping early...");
-                                    break;
-                                }
                             }
                         }
                     }
+                    catch { }
                 }
-                catch { }
             }
-            
-            Console.WriteLine($"Found {productLinks.Count} product links");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error fetching product links: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
         }
 
         return productLinks;
@@ -180,7 +210,31 @@ public class HepsiburadaScraper : IDisposable
                 htmlDoc.LoadHtml(html);
             }
 
-            var product = new ProductInfo { ProductUrl = productUrl };
+            var product = new ProductInfo 
+            { 
+                ProductUrl = productUrl,
+                Source = "hepsiburada"
+            };
+            
+            // EXTRACT PRODUCT ID from URL
+            // Hepsiburada URL format: https://www.hepsiburada.com/product-name-p-HBCV0000870EF8 or -pm-CODE
+            try
+            {
+                var match = Regex.Match(productUrl, @"-(pm?)-([A-Z0-9]+)$", RegexOptions.IgnoreCase);
+                if (match.Success)
+                {
+                    product.ProductId = match.Groups[2].Value;
+                    Console.WriteLine($"[Product ID] ? Extracted: {product.ProductId} from {productUrl}");
+                }
+                else
+                {
+                    Console.WriteLine($"[Product ID] ? FAILED to extract from URL: {productUrl}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Product ID] ? Extraction error: {ex.Message}");
+            }
             
             // EXTRACT PRODUCT NAME
             try
@@ -324,6 +378,14 @@ public class HepsiburadaScraper : IDisposable
                                 else if (!imgUrl.StartsWith("http"))
                                     imgUrl = BaseUrl + imgUrl;
                                 
+                                // Filter out marketing/automation images
+                                if (imgUrl.Contains("automation", StringComparison.OrdinalIgnoreCase) || 
+                                    imgUrl.Contains("marketing", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Console.WriteLine($"[Image Filter] Skipping marketing/automation image: {imgUrl.Substring(0, Math.Min(80, imgUrl.Length))}");
+                                    continue;
+                                }
+                                
                                 if (!allImages.Contains(imgUrl))
                                     allImages.Add(imgUrl);
                             }
@@ -351,6 +413,14 @@ public class HepsiburadaScraper : IDisposable
                                     else if (!imgUrl.StartsWith("http"))
                                         imgUrl = BaseUrl + imgUrl;
                                     
+                                    // Filter out marketing/automation images
+                                    if (imgUrl.Contains("automation", StringComparison.OrdinalIgnoreCase) || 
+                                        imgUrl.Contains("marketing", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        Console.WriteLine($"[Image Filter] Skipping marketing/automation image: {imgUrl.Substring(0, Math.Min(80, imgUrl.Length))}");
+                                        continue;
+                                    }
+                                    
                                     if (!allImages.Contains(imgUrl))
                                         allImages.Add(imgUrl);
                                 }
@@ -361,11 +431,16 @@ public class HepsiburadaScraper : IDisposable
                 
                 if (allImages.Count > 0)
                 {
+                    Console.WriteLine($"[Image Extraction] Found {allImages.Count} valid product images (after filtering)");
                     product.ImageUrl = allImages[0];
                     for (int i = 1; i < allImages.Count; i++)
                     {
                         product.AdditionalImages.Add(allImages[i]);
                     }
+                }
+                else
+                {
+                    Console.WriteLine("[Image Extraction] No valid images found after filtering");
                 }
             }
             catch { }

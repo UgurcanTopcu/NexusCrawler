@@ -132,7 +132,31 @@ public class TrendyolScraper : IDisposable
                 htmlDoc.LoadHtml(html);
             }
 
-            var product = new ProductInfo { ProductUrl = productUrl };
+            var product = new ProductInfo 
+            { 
+                ProductUrl = productUrl,
+                Source = "trendyol"
+            };
+            
+            // EXTRACT PRODUCT ID from URL
+            // Trendyol URL format: https://www.trendyol.com/product-name-p-123456789
+            try
+            {
+                var match = Regex.Match(productUrl, @"-p-(\d+)", RegexOptions.IgnoreCase);
+                if (match.Success)
+                {
+                    product.ProductId = match.Groups[1].Value;
+                    Console.WriteLine($"[Product ID] ✓ Extracted: {product.ProductId} from {productUrl}");
+                }
+                else
+                {
+                    Console.WriteLine($"[Product ID] ❌ FAILED to extract from URL: {productUrl}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Product ID] ❌ Extraction error: {ex.Message}");
+            }
             
             // EXTRACT PRODUCT NAME & BRAND
             try
@@ -177,7 +201,7 @@ public class TrendyolScraper : IDisposable
                             var priceElements = Array.from(document.querySelectorAll('*'));
                             var sepetteElement = priceElements.find(el => 
                                 el.textContent.includes('Sepette') && 
-                                el.textContent.match(/[\d.,]+\s*TL/)
+                                el.textContent.match(/[\d.,]+\s*TL/
                             );
                             
                             if (sepetteElement) {
@@ -206,6 +230,7 @@ public class TrendyolScraper : IDisposable
                 if (string.IsNullOrEmpty(product.DiscountedPrice))
                 {
                     var allElements = htmlDoc.DocumentNode.SelectNodes("//*[contains(text(), 'Sepette')]");
+
                     if (allElements != null)
                     {
                         foreach (var elem in allElements)
@@ -308,6 +333,14 @@ public class TrendyolScraper : IDisposable
                                 else if (!imgUrl.StartsWith("http"))
                                     imgUrl = BaseUrl + imgUrl;
                                 
+                                // Filter out marketing/automation images
+                                if (imgUrl.Contains("automation", StringComparison.OrdinalIgnoreCase) || 
+                                    imgUrl.Contains("marketing", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Console.WriteLine($"[Image Filter] Skipping marketing/automation image: {imgUrl.Substring(0, Math.Min(80, imgUrl.Length))}");
+                                    continue;
+                                }
+                                
                                 if (!allImages.Contains(imgUrl))
                                     allImages.Add(imgUrl);
                             }
@@ -335,6 +368,14 @@ public class TrendyolScraper : IDisposable
                                     else if (!imgUrl.StartsWith("http"))
                                         imgUrl = BaseUrl + imgUrl;
                                     
+                                    // Filter out marketing/automation images
+                                    if (imgUrl.Contains("automation", StringComparison.OrdinalIgnoreCase) || 
+                                        imgUrl.Contains("marketing", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        Console.WriteLine($"[Image Filter] Skipping marketing/automation image: {imgUrl.Substring(0, Math.Min(80, imgUrl.Length))}");
+                                        continue;
+                                    }
+                                    
                                     if (!allImages.Contains(imgUrl))
                                         allImages.Add(imgUrl);
                                 }
@@ -345,11 +386,16 @@ public class TrendyolScraper : IDisposable
                 
                 if (allImages.Count > 0)
                 {
+                    Console.WriteLine($"[Image Extraction] Found {allImages.Count} valid product images (after filtering)");
                     product.ImageUrl = allImages[0];
                     for (int i = 1; i < allImages.Count; i++)
                     {
                         product.AdditionalImages.Add(allImages[i]);
                     }
+                }
+                else
+                {
+                    Console.WriteLine("[Image Extraction] No valid images found after filtering");
                 }
             }
             catch { }
@@ -373,31 +419,148 @@ public class TrendyolScraper : IDisposable
             }
             catch { }
 
-            // EXTRACT DESCRIPTION - Simplified to fastest method first
+            // EXTRACT DESCRIPTION - Get the actual product description text
             try
             {
-                var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'description')]");
-                if (scriptNodes != null)
+                // Try to get the detailed description from the page
+                string detailedDescription = "";
+                
+                if (Method == ScrapeMethod.Selenium && _driver != null)
                 {
-                    foreach (var scriptNode in scriptNodes)
+                    try
                     {
-                        var scriptText = scriptNode.InnerText;
-                        var jsonMatch = Regex.Match(scriptText, @"""description"":\s*""([^""]{100,})""", RegexOptions.IgnoreCase);
-                        if (jsonMatch.Success)
+                        var jsExecutor = (IJavaScriptExecutor)_driver!;
+                        
+                        // First, try to click the "ÜRÜN BİLGİLERİ" tab to ensure description is loaded
+                        try
                         {
-                            var desc = Regex.Unescape(jsonMatch.Groups[1].Value);
-                            desc = Regex.Replace(desc, @"\s+", " ").Trim();
+                            var descriptionTab = _driver.FindElement(By.XPath("//a[contains(text(), 'ÜRÜN BİLGİLERİ')]"));
+                            descriptionTab.Click();
+                            await Task.Delay(500); // Wait for content to load
+                        }
+                        catch { }
+                        
+                        // Get all paragraphs from the FIRST content-description-container
+                        var descriptionText = jsExecutor.ExecuteScript(@"
+                            // Find the first content-description-container
+                            var container = document.querySelector('.content-description-container');
+                            var textParts = [];
                             
-                            if (desc.Length > 2000)
-                                desc = desc.Substring(0, 2000) + "...";
+                            if (container) {
+                                // Get all p.product-description-content within this container
+                                var descElements = container.querySelectorAll('p.product-description-content');
+                                console.log('Found ' + descElements.length + ' description paragraphs');
+                                
+                                descElements.forEach(function(p, index) {
+                                    var text = p.textContent.trim();
+                                    console.log('Paragraph ' + index + ': ' + text.substring(0, 50));
+                                    if (text && text.length > 5 && !text.startsWith('...')) {
+                                        textParts.push('- ' + text);
+                                    }
+                                });
+                            } else {
+                                console.log('No content-description-container found');
+                            }
                             
-                            product.Description = desc;
-                            break;
+                            console.log('Total lines extracted: ' + textParts.length);
+                            return textParts.join('\n');
+                        ");
+                        
+                        if (descriptionText != null && !string.IsNullOrWhiteSpace(descriptionText.ToString()))
+                        {
+                            detailedDescription = descriptionText.ToString()!.Trim();
+                            Console.WriteLine($"[Description] Extracted {detailedDescription.Split('\n').Length} lines");
+                        }
+                        else
+                        {
+                            Console.WriteLine("[Description] No description text extracted via JavaScript");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Description] JavaScript extraction failed: {ex.Message}");
+                    }
+                }
+                
+                // Fallback: Try HTML parsing
+                if (string.IsNullOrEmpty(detailedDescription))
+                {
+                    Console.WriteLine("[Description] Trying HTML parsing fallback");
+                    
+                    // Find the first content-description-container
+                    var container = htmlDoc.DocumentNode.SelectSingleNode("//div[contains(@class, 'content-description-container')]");
+                    
+                    if (container != null)
+                    {
+                        // Get all p.product-description-content within this container
+                        var descParagraphs = container.SelectNodes(".//p[contains(@class, 'product-description-content')]");
+                        
+                        if (descParagraphs != null && descParagraphs.Count > 0)
+                        {
+                            Console.WriteLine($"[Description] Found {descParagraphs.Count} paragraphs in HTML");
+                            var descLines = new List<string>();
+                            foreach (var p in descParagraphs)
+                            {
+                                var text = p.InnerText.Trim();
+                                if (!string.IsNullOrWhiteSpace(text) && text.Length > 5 && !text.StartsWith("..."))
+                                {
+                                    descLines.Add("- " + text);
+                                }
+                            }
+                            detailedDescription = string.Join("\n", descLines);
+                            Console.WriteLine($"[Description] Extracted {descLines.Count} lines from HTML");
+                        }
+                        else
+                        {
+                            Console.WriteLine("[Description] No paragraphs found in container");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("[Description] No content-description-container found in HTML");
+                    }
+                }
+                
+                // If we got detailed description, use it
+                if (!string.IsNullOrEmpty(detailedDescription))
+                {
+                    Console.WriteLine($"[Description] Final description length: {detailedDescription.Length} chars");
+                    if (detailedDescription.Length > 5000)
+                        detailedDescription = detailedDescription.Substring(0, 5000) + "...";
+                    
+                    product.Description = detailedDescription;
+                }
+                else
+                {
+                    Console.WriteLine("[Description] No detailed description found, trying JSON-LD fallback");
+                    // Fallback to JSON-LD meta description
+                    var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'description')]");
+                    if (scriptNodes != null)
+                    {
+                        foreach (var scriptNode in scriptNodes)
+                        {
+                            var scriptText = scriptNode.InnerText;
+                            var jsonMatch = Regex.Match(scriptText, @"""description"":\s*""([^""]{100,})""", RegexOptions.IgnoreCase);
+                            if (jsonMatch.Success)
+                            {
+                                var desc = Regex.Unescape(jsonMatch.Groups[1].Value);
+                                desc = Regex.Replace(desc, @"\s+", " ").Trim();
+                                
+                                if (desc.Length > 2000)
+                                    desc = desc.Substring(0, 2000) + "...";
+                                
+                                product.Description = desc;
+                                Console.WriteLine($"[Description] Used JSON-LD fallback: {desc.Substring(0, Math.Min(50, desc.Length))}...");
+                                break;
+                            }
                         }
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Description] Error: {ex.Message}");
+            }
 
             // EXTRACT BARCODE - Simplified
             try

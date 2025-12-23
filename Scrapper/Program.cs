@@ -263,6 +263,19 @@ app.MapGet("/", () => Results.Content("""
             </div>
             
             <div class="form-group">
+                <label for="template">Export Template (Optional)</label>
+                <select 
+                    id="template" 
+                    name="template"
+                    style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;"
+                >
+                    <option value="">Default (No Template)</option>
+                    <option value="trendyol_kettle">📋 Trendyol Kettle (MediaMarkt)</option>
+                </select>
+                <div class="input-hint">Select a template to format the Excel file for specific platforms (e.g., MediaMarkt, Amazon)</div>
+            </div>
+            
+            <div class="form-group">
                 <div class="checkbox-label">
                     <input 
                         type="checkbox" 
@@ -346,6 +359,7 @@ app.MapGet("/", () => Results.Content("""
             const excludePrice = document.getElementById('excludePrice').checked;
             const processImages = document.getElementById('processImages').checked;
             const scrapeMethod = document.getElementById('scrapeMethod').value;
+            const templateName = document.getElementById('template').value; // NEW: Get template
             
             // Disable form
             startBtn.disabled = true;
@@ -365,7 +379,8 @@ app.MapGet("/", () => Results.Content("""
                         maxProducts: parseInt(maxProducts),
                         excludePrice: excludePrice,
                         processImages: processImages,
-                        scrapeMethod: scrapeMethod
+                        scrapeMethod: scrapeMethod,
+                        templateName: templateName || null // NEW: Send template
                     })
                 });
                 
@@ -473,6 +488,7 @@ app.MapPost("/api/scrape", async (ScraperRequest request, TrendyolScraperService
                 request.ExcludePrice,
                 scrapeMethod,
                 request.ProcessImages,
+                request.TemplateName, // NEW: Pass template name
                 async (progress, message, type) =>
                 {
                     var data = System.Text.Json.JsonSerializer.Serialize(new
@@ -487,6 +503,14 @@ app.MapPost("/api/scrape", async (ScraperRequest request, TrendyolScraperService
             );
         }
     }, "text/event-stream");
+});
+
+// NEW: Get available templates
+app.MapGet("/api/templates", () =>
+{
+    var templateService = new Scrapper.Services.TemplateService();
+    var templates = templateService.GetTemplateInfo();
+    return Results.Ok(templates);
 });
 
 // Download endpoint
@@ -508,4 +532,12 @@ Console.WriteLine("Press Ctrl+C to stop the server");
 
 app.Run("http://localhost:5000");
 
-public record ScraperRequest(string Platform, string CategoryUrl, int MaxProducts, bool ExcludePrice, bool ProcessImages, string ScrapeMethod);
+public record ScraperRequest(
+    string Platform, 
+    string CategoryUrl, 
+    int MaxProducts, 
+    bool ExcludePrice, 
+    bool ProcessImages, 
+    string ScrapeMethod,
+    string? TemplateName // NEW: Optional template name
+);

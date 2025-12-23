@@ -1,4 +1,3 @@
-using FluentFTP;
 using Scrapper.Models;
 
 namespace Scrapper.Services;
@@ -12,107 +11,168 @@ public class FtpUploadService
         _config = config;
     }
 
-    public async Task<string?> UploadImageAsync(byte[] imageData, string fileName, Action<int>? onProgress = null)
+    public async Task<string?> UploadImageAsync(byte[] imageData, string fileName, string site = "", string productId = "", Action<int>? onProgress = null)
     {
-        AsyncFtpClient? client = null;
-        int maxRetries = 3;
-        int retryDelay = 1000; // 1 second
-
-        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        return await Task.Run(() =>
         {
             try
             {
-                // Create a new client for each upload to avoid connection issues
-                client = new AsyncFtpClient(_config.Host, _config.Username, _config.Password, _config.Port);
+                Console.WriteLine($"\n[FTP] ========== UPLOAD START ==========");
+                Console.WriteLine($"[FTP] File: {fileName}");
+                Console.WriteLine($"[FTP] Size: {imageData.Length} bytes");
+                Console.WriteLine($"[FTP] Site: {site}");
+                Console.WriteLine($"[FTP] Product ID: {productId}");
+                Console.WriteLine($"[FTP] Host: {_config.Host}:{_config.Port}");
+                Console.WriteLine($"[FTP] User: {_config.Username}");
                 
-                // Configure client for better reliability
-                client.Config.ConnectTimeout = 30000; // 30 seconds
-                client.Config.ReadTimeout = 60000; // 60 seconds - for reading responses
-                client.Config.DataConnectionReadTimeout = 120000; // 120 seconds - for data transfer
-                client.Config.DataConnectionConnectTimeout = 30000; // 30 seconds - for data connection
-                client.Config.SocketKeepAlive = true; // Keep connection alive during transfers
-                client.Config.DataConnectionType = FtpDataConnectionType.PASV; // Passive mode
-                
-                await client.Connect();
-                
-                // Create remote directory if it doesn't exist
-                if (!await client.DirectoryExists(_config.RemotePath))
+                // Setup session options - EXACTLY like Filestash
+                WinSCP.SessionOptions sessionOptions = new WinSCP.SessionOptions
                 {
-                    await client.CreateDirectory(_config.RemotePath);
+                    Protocol = WinSCP.Protocol.Ftp,  // Plain FTP
+                    HostName = _config.Host,
+                    PortNumber = _config.Port,
+                    UserName = _config.Username,
+                    Password = _config.Password,
+                    FtpMode = WinSCP.FtpMode.Passive,  // PASV mode
+                    FtpSecure = WinSCP.FtpSecure.None,  // No encryption
+                    Timeout = TimeSpan.FromSeconds(30)
+                };
+                
+                using (WinSCP.Session session = new WinSCP.Session())
+                {
+                    // Enable logging for debugging - use unique log file per upload
+                    session.SessionLogPath = Path.Combine(Path.GetTempPath(), $"winscp_log_{Guid.NewGuid()}.txt");
+                    
+                    Console.WriteLine($"[FTP] Connecting...");
+                    session.Open(sessionOptions);
+                    Console.WriteLine($"[FTP] ? Connected successfully!");
+                    
+                    // Build remote path with site/productId structure
+                    string remotePath = _config.RemotePath ?? "/";
+                    
+                    // Add site folder if provided
+                    if (!string.IsNullOrEmpty(site))
+                    {
+                        remotePath = $"{remotePath.TrimEnd('/')}/{site}";
+                        
+                        // Create site directory if it doesn't exist
+                        try
+                        {
+                            if (!session.FileExists(remotePath))
+                            {
+                                Console.WriteLine($"[FTP] Creating site directory: {remotePath}");
+                                session.CreateDirectory(remotePath);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[FTP] Warning: Could not create site directory: {ex.Message}");
+                        }
+                    }
+                    
+                    // Add productId folder if provided
+                    if (!string.IsNullOrEmpty(productId))
+                    {
+                        remotePath = $"{remotePath}/{productId}";
+                        
+                        // Create product directory if it doesn't exist
+                        try
+                        {
+                            if (!session.FileExists(remotePath))
+                            {
+                                Console.WriteLine($"[FTP] Creating product directory: {remotePath}");
+                                session.CreateDirectory(remotePath);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[FTP] Warning: Could not create product directory: {ex.Message}");
+                        }
+                    }
+                    
+                    // Save byte array to temporary file - USE UNIQUE FILENAME TO PREVENT CONFLICTS
+                    var tempFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}_{fileName}");
+                    File.WriteAllBytes(tempFile, imageData);
+                    
+                    try
+                    {
+                        // Upload
+                        var remoteFilePath = $"{remotePath}/{fileName}";
+                        
+                        Console.WriteLine($"[FTP] Uploading to: {remoteFilePath}");
+                        
+                        WinSCP.TransferOptions transferOptions = new WinSCP.TransferOptions();
+                        transferOptions.TransferMode = WinSCP.TransferMode.Binary;
+                        
+                        WinSCP.TransferOperationResult transferResult = session.PutFiles(tempFile, remoteFilePath, false, transferOptions);
+                        
+                        // Check for errors
+                        transferResult.Check();
+                        
+                        Console.WriteLine($"[FTP] ? Upload successful!");
+                        
+                        var cdnUrl = $"{_config.BaseUrl}{remoteFilePath}";
+                        Console.WriteLine($"[FTP] ? CDN URL: {cdnUrl}");
+                        Console.WriteLine($"[FTP] ========== UPLOAD COMPLETE ==========\n");
+                        
+                        return cdnUrl;
+                    }
+                    finally
+                    {
+                        // Clean up temp file
+                        if (File.Exists(tempFile))
+                        {
+                            try
+                            {
+                                File.Delete(tempFile);
+                            }
+                            catch
+                            {
+                                // Ignore cleanup errors
+                            }
+                        }
+                    }
                 }
-
-                // Upload file
-                var remotePath = $"{_config.RemotePath}/{fileName}";
-                
-                using var stream = new MemoryStream(imageData);
-                var progress = new Progress<FtpProgress>(p =>
-                {
-                    var percentage = (int)p.Progress;
-                    onProgress?.Invoke(percentage);
-                });
-
-                var result = await client.UploadStream(stream, remotePath, FtpRemoteExists.Overwrite, true, progress);
-                
-                await client.Disconnect();
-
-                if (result == FtpStatus.Success)
-                {
-                    // Return CDN URL
-                    return $"{_config.BaseUrl}{remotePath}";
-                }
-                
-                Console.WriteLine($"FTP upload attempt {attempt} failed for {fileName} with status: {result}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"FTP upload attempt {attempt}/{maxRetries} error for {fileName}: {ex.Message}");
+                Console.WriteLine($"\n[FTP] ========== ERROR ==========");
+                Console.WriteLine($"[FTP] Exception: {ex.GetType().Name}");
+                Console.WriteLine($"[FTP] Message: {ex.Message}");
                 
-                // Cleanup client
-                if (client != null)
+                if (ex.InnerException != null)
                 {
-                    try
-                    {
-                        if (client.IsConnected)
-                        {
-                            await client.Disconnect();
-                        }
-                        client.Dispose();
-                    }
-                    catch { }
+                    Console.WriteLine($"[FTP] Inner: {ex.InnerException.Message}");
                 }
-
-                if (attempt < maxRetries)
-                {
-                    await Task.Delay(retryDelay * attempt); // Exponential backoff
-                }
-                else
-                {
-                    Console.WriteLine($"FTP upload failed for {fileName} after {maxRetries} attempts");
-                    return null;
-                }
+                
+                Console.WriteLine($"[FTP] See detailed log in temp folder (winscp_log_*.txt)");
+                Console.WriteLine($"[FTP] ============================\n");
+                
+                return null;
             }
-        }
-
-        return null;
+        });
     }
 
     public async Task<List<string>> UploadMultipleImagesAsync(
         List<byte[]> imagesData, 
         string productName,
+        string site = "",
+        string productId = "",
         Func<int, int, Task>? onProgress = null)
     {
         var uploadedUrls = new List<string>();
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var safeProductName = SanitizeFileName(productName);
 
         for (int i = 0; i < imagesData.Count; i++)
         {
-            var fileName = $"{safeProductName}_{timestamp}_{i + 1}.jpg";
-            var url = await UploadImageAsync(imagesData[i], fileName);
+            var fileName = $"image_{i + 1}.jpg";
+            Console.WriteLine($"\n[FTP] ========== Image {i + 1} of {imagesData.Count} ==========");
+            
+            var url = await UploadImageAsync(imagesData[i], fileName, site, productId);
             
             if (!string.IsNullOrEmpty(url))
             {
                 uploadedUrls.Add(url);
+                Console.WriteLine($"[FTP] Success count: {uploadedUrls.Count}/{i + 1}");
             }
 
             if (onProgress != null)
@@ -120,23 +180,27 @@ public class FtpUploadService
                 await onProgress(i + 1, imagesData.Count);
             }
             
-            // Small delay between uploads to avoid overwhelming the server
-            await Task.Delay(200);
+            await Task.Delay(100);
         }
 
+        Console.WriteLine($"\n[FTP] ========== BATCH COMPLETE ==========");
+        Console.WriteLine($"[FTP] Total: {uploadedUrls.Count}/{imagesData.Count} uploaded");
+        Console.WriteLine($"[FTP] ======================================\n");
+        
         return uploadedUrls;
     }
 
     private string SanitizeFileName(string fileName)
     {
+        if (string.IsNullOrWhiteSpace(fileName))
+            return "product";
+
         var invalid = Path.GetInvalidFileNameChars();
         var sanitized = string.Join("_", fileName.Split(invalid, StringSplitOptions.RemoveEmptyEntries));
         
-        // Limit length
         if (sanitized.Length > 50)
             sanitized = sanitized.Substring(0, 50);
         
-        // Replace spaces and special chars (Turkish characters)
         sanitized = sanitized.Replace(" ", "_")
                              .Replace("þ", "s").Replace("Þ", "S")
                              .Replace("ý", "i").Replace("Ý", "I")
