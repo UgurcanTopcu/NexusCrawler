@@ -213,7 +213,7 @@ public class HepsiburadaScraper : IDisposable
             var product = new ProductInfo 
             { 
                 ProductUrl = productUrl,
-                Source = "hepsiburada"
+                Source = "Orange"
             };
             
             // EXTRACT PRODUCT ID from URL

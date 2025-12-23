@@ -135,7 +135,7 @@ public class TrendyolScraper : IDisposable
             var product = new ProductInfo 
             { 
                 ProductUrl = productUrl,
-                Source = "trendyol"
+                Source = "Gunes"
             };
             
             // EXTRACT PRODUCT ID from URL
@@ -162,6 +162,7 @@ public class TrendyolScraper : IDisposable
             try
             {
                 var h1Node = htmlDoc.DocumentNode.SelectSingleNode("//h1[contains(@class, 'pr-new-br') or contains(@class, 'product-title')]");
+
                 if (h1Node != null)
                 {
                     product.Name = h1Node.InnerText.Trim();
@@ -314,6 +315,10 @@ public class TrendyolScraper : IDisposable
                         var imageUrls = jsExecutor.ExecuteScript(@"
                             var images = [];
                             document.querySelectorAll('[class*=""gallery""] img, [class*=""product-image""] img, img[src*=""productimages""]').forEach(img => {
+                                var alt = img.alt || '';
+                                if (alt.toLowerCase().includes('product stamp')) {
+                                    return; // Skip product stamp images
+                                }
                                 var src = img.src || img.getAttribute('data-src') || '';
                                 if (src && !images.includes(src)) {
                                     images.push(src);
@@ -359,6 +364,14 @@ public class TrendyolScraper : IDisposable
                         {
                             foreach (var node in nodes)
                             {
+                                // Skip images with alt="Product stamp"
+                                var altText = node.GetAttributeValue("alt", "");
+                                if (altText.Contains("Product stamp", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Console.WriteLine($"[Image Filter] Skipping product stamp image");
+                                    continue;
+                                }
+                                
                                 var imgUrl = node.GetAttributeValue("src", "") ?? node.GetAttributeValue("data-src", "");
                                 
                                 if (!string.IsNullOrEmpty(imgUrl))
@@ -469,11 +482,7 @@ public class TrendyolScraper : IDisposable
                         if (descriptionText != null && !string.IsNullOrWhiteSpace(descriptionText.ToString()))
                         {
                             detailedDescription = descriptionText.ToString()!.Trim();
-                            Console.WriteLine($"[Description] Extracted {detailedDescription.Split('\n').Length} lines");
-                        }
-                        else
-                        {
-                            Console.WriteLine("[Description] No description text extracted via JavaScript");
+                            Console.WriteLine($"[Description] Extracted {detailedDescription.Split('\n').Length} lines via JavaScript");
                         }
                     }
                     catch (Exception ex)
@@ -482,22 +491,27 @@ public class TrendyolScraper : IDisposable
                     }
                 }
                 
-                // Fallback: Try HTML parsing
+                // Fallback: Try HTML parsing (used by both Selenium fallback and Scrape.do)
                 if (string.IsNullOrEmpty(detailedDescription))
                 {
                     Console.WriteLine("[Description] Trying HTML parsing fallback");
                     
-                    // Find the first content-description-container
-                    var container = htmlDoc.DocumentNode.SelectSingleNode("//div[contains(@class, 'content-description-container')]");
-                    
-                    if (container != null)
+                    // Try multiple description selectors
+                    var descriptionSelectors = new[]
                     {
-                        // Get all p.product-description-content within this container
-                        var descParagraphs = container.SelectNodes(".//p[contains(@class, 'product-description-content')]");
+                        "//div[contains(@class, 'content-description-container')]//p[contains(@class, 'product-description-content')]",
+                        "//div[contains(@class, 'product-desc')]//p",
+                        "//div[contains(@class, 'detail-desc')]//p",
+                        "//*[contains(@class, 'description')]//p"
+                    };
+                    
+                    foreach (var selector in descriptionSelectors)
+                    {
+                        var descParagraphs = htmlDoc.DocumentNode.SelectNodes(selector);
                         
                         if (descParagraphs != null && descParagraphs.Count > 0)
                         {
-                            Console.WriteLine($"[Description] Found {descParagraphs.Count} paragraphs in HTML");
+                            Console.WriteLine($"[Description] Found {descParagraphs.Count} paragraphs using selector: {selector}");
                             var descLines = new List<string>();
                             foreach (var p in descParagraphs)
                             {
@@ -507,17 +521,14 @@ public class TrendyolScraper : IDisposable
                                     descLines.Add("- " + text);
                                 }
                             }
-                            detailedDescription = string.Join("\n", descLines);
-                            Console.WriteLine($"[Description] Extracted {descLines.Count} lines from HTML");
+                            
+                            if (descLines.Count > 0)
+                            {
+                                detailedDescription = string.Join("\n", descLines);
+                                Console.WriteLine($"[Description] Extracted {descLines.Count} lines from HTML");
+                                break;
+                            }
                         }
-                        else
-                        {
-                            Console.WriteLine("[Description] No paragraphs found in container");
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine("[Description] No content-description-container found in HTML");
                     }
                 }
                 
