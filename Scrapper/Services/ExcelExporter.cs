@@ -5,18 +5,11 @@ namespace Scrapper.Services;
 
 public class ExcelExporter
 {
-    // Static constructor - runs once when the class is first used
-    // EPPlus 8.x: LicenseContext is obsolete, use EPPlusLicense.SetNonCommercialPersonal or SetNonCommercialOrganization
-    static ExcelExporter()
-    {
-        // Set the license for non-commercial use (update with your name or organization as needed)
-        ExcelPackage.License.SetNonCommercialPersonal("Your Name");
-    }
-
     public void ExportToExcel(List<ProductInfo> products, string filePath, bool excludePrice = false, bool useCdnUrls = false)
     {
         try
         {
+            // EPPlus license already set in Program.cs
             using var package = new ExcelPackage();
             var worksheet = package.Workbook.Worksheets.Add("Products");
 

@@ -43,11 +43,11 @@ public class TrendyolScraper : IDisposable
         }
     }
 
-    public async Task<List<string>> GetProductLinksAsync(string categoryUrl)
+    public async Task<List<string>> GetProductLinksAsync(string categoryUrl, int maxProducts = 50, Func<int, string, string, Task>? onProgress = null)
     {
         if (Method == ScrapeMethod.ScrapeDo)
         {
-            return await _scrapeDoService!.GetProductLinksAsync(categoryUrl);
+            return await _scrapeDoService!.GetProductLinksAsync(categoryUrl, maxProducts, isHepsiburada: false);
         }
 
         var productLinks = new List<string>();
@@ -55,44 +55,177 @@ public class TrendyolScraper : IDisposable
         try
         {
             InitializeDriver();
-            _driver!.Navigate().GoToUrl(categoryUrl);
             
-            var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(15));
-            wait.Until(d => d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0);
+            // Parse URL to preserve existing query parameters (like sst=BEST_SELLER)
+            var uri = new Uri(categoryUrl.StartsWith("http") ? categoryUrl : "https://" + categoryUrl);
+            var basePath = uri.GetLeftPart(UriPartial.Path);
+            var existingParams = System.Web.HttpUtility.ParseQueryString(uri.Query);
             
-            // Optimized scrolling with reduced delays
-            for (int i = 0; i < 5; i++)
+            // Remove pi parameter if it exists in the original URL
+            existingParams.Remove("pi");
+            
+            Console.WriteLine("\n[Trendyol] Starting product discovery...");
+            Console.WriteLine($"[Trendyol] Target: {maxProducts} products");
+            Console.Out.Flush();
+            
+            if (onProgress != null)
             {
-                ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
-                await Task.Delay(300); // Reduced from 500ms
+                await onProgress(5, $"🔍 Finding products (target: {maxProducts})...", "info");
             }
-
-            var linkElements = _driver.FindElements(By.CssSelector("a[href*='-p-']"));
             
-            foreach (var element in linkElements)
+            int page = 1;
+            // Calculate max pages needed: ~24 products per page, add buffer for 500 products
+            int maxPages = Math.Max(30, (maxProducts / 20) + 5);
+            int previousCount = 0;
+            int emptyPageCount = 0;
+            
+            while (page <= maxPages && productLinks.Count < maxProducts)
             {
+                // Build paginated URL preserving existing parameters
+                string paginatedUrl;
+                if (page == 1 && existingParams.Count == 0)
+                {
+                    paginatedUrl = basePath;
+                }
+                else
+                {
+                    // Clone params and add/update pi
+                    var pageParams = System.Web.HttpUtility.ParseQueryString(existingParams.ToString());
+                    if (page > 1)
+                    {
+                        pageParams["pi"] = page.ToString();
+                    }
+                    paginatedUrl = pageParams.Count > 0 ? $"{basePath}?{pageParams}" : basePath;
+                }
+                
+                Console.WriteLine($"[Trendyol] Page {page}...");
+                Console.Out.Flush();
+                
+                _driver!.Navigate().GoToUrl(paginatedUrl);
+                
+                // Wait for products to load
+                var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(10));
                 try
                 {
-                    var href = element.GetAttribute("href");
-                    if (!string.IsNullOrEmpty(href) && href.Contains("-p-"))
+                    wait.Until(d => d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0);
+                }
+                catch
+                {
+                    emptyPageCount++;
+                    if (emptyPageCount >= 2)
                     {
-                        var fullUrl = href.StartsWith("http") ? href : BaseUrl + href;
-                        var cleanUrl = fullUrl.Split('?')[0];
-                        
-                        if (!productLinks.Contains(cleanUrl))
+                        Console.WriteLine($"[Trendyol] No more products available");
+                        Console.Out.Flush();
+                        break;
+                    }
+                    page++;
+                    continue;
+                }
+                
+                await Task.Delay(500); // Let page stabilize
+                
+                // Scroll down on this page to load all lazy-loaded products
+                var jsExecutor = (IJavaScriptExecutor)_driver;
+                for (int scroll = 0; scroll < 3; scroll++)
+                {
+                    jsExecutor.ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
+                    await Task.Delay(300);
+                }
+                
+                // Extract links from current page
+                var linkElements = _driver.FindElements(By.CssSelector("a[href*='-p-']"));
+                int newLinksOnPage = 0;
+                int lastReportedCount = productLinks.Count;
+                
+                foreach (var element in linkElements)
+                {
+                    // Stop if we already have enough products
+                    if (productLinks.Count >= maxProducts)
+                    {
+                        break;
+                    }
+                    
+                    try
+                    {
+                        var href = element.GetAttribute("href");
+                        if (!string.IsNullOrEmpty(href) && href.Contains("-p-"))
                         {
-                            productLinks.Add(cleanUrl);
+                            var fullUrl = href.StartsWith("http") ? href : BaseUrl + href;
+                            var cleanUrl = fullUrl.Split('?')[0];
+                            
+                            if (!productLinks.Contains(cleanUrl))
+                            {
+                                productLinks.Add(cleanUrl);
+                                newLinksOnPage++;
+                                
+                                // Show LIVE count on console
+                                Console.Write($"\r[Trendyol] Found: {productLinks.Count}/{maxProducts} products   ");
+                                Console.Out.Flush();
+                                
+                                // Send to UI every 5 products or at target
+                                if (onProgress != null && (productLinks.Count % 5 == 0 || productLinks.Count == maxProducts))
+                                {
+                                    var progressPercent = Math.Min(5 + (int)((productLinks.Count / (double)maxProducts) * 5), 10);
+                                    await onProgress(progressPercent, $"📦 Found {productLinks.Count}/{maxProducts} products", "info");
+                                }
+                            }
                         }
                     }
+                    catch { }
                 }
-                catch { }
+                
+                Console.WriteLine(); // New line after the count
+                Console.Out.Flush();
+                
+                // Check if we reached the target
+                if (productLinks.Count >= maxProducts)
+                {
+                    Console.WriteLine($"[Trendyol] ✓ Target reached!");
+                    Console.Out.Flush();
+                    if (onProgress != null)
+                    {
+                        await onProgress(10, $"✅ Found all {productLinks.Count} product URLs!", "success");
+                    }
+                    break;
+                }
+                
+                // Check if we got new products
+                if (productLinks.Count == previousCount)
+                {
+                    emptyPageCount++;
+                    if (emptyPageCount >= 2)
+                    {
+                        Console.WriteLine($"[Trendyol] ✓ End of available products");
+                        Console.Out.Flush();
+                        if (onProgress != null && productLinks.Count > 0)
+                        {
+                            await onProgress(10, $"✅ Found {productLinks.Count} products (all available)", "success");
+                        }
+                        break;
+                    }
+                }
+                else
+                {
+                    emptyPageCount = 0; // Reset counter if we found products
+                    previousCount = productLinks.Count;
+                }
+                
+                page++;
+                
+                // Small delay between page loads
+                await Task.Delay(300);
             }
-
-            Console.WriteLine($"Found {productLinks.Count} product links");
+            
+            Console.WriteLine($"\n[Trendyol] ✓ Total: {productLinks.Count} products from {page - 1} pages\n");
+            Console.Out.Flush();
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error fetching product links: {ex.Message}");
+            if (onProgress != null)
+            {
+                await onProgress(10, $"❌ Error finding products: {ex.Message}", "error");
+            }
         }
 
         return productLinks;
@@ -576,7 +709,7 @@ public class TrendyolScraper : IDisposable
             // EXTRACT BARCODE - Simplified
             try
             {
-                var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'barcode')]");
+                var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text', 'barcode')]");
                 if (scriptNodes != null)
                 {
                     foreach (var scriptNode in scriptNodes)

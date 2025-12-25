@@ -5,11 +5,6 @@ namespace Scrapper.Services;
 
 public class TemplateExcelExporter
 {
-    static TemplateExcelExporter()
-    {
-        ExcelPackage.License.SetNonCommercialPersonal("Your Name");
-    }
-
     public void ExportWithTemplate(
         List<ProductInfo> products, 
         string filePath, 
@@ -18,9 +13,55 @@ public class TemplateExcelExporter
     {
         try
         {
+            // EPPlus license already set in Program.cs
             Console.WriteLine($"\n[Template Export] Using template: {template.Name}");
             Console.WriteLine($"[Template Export] Columns: {template.Columns.Count}");
             Console.WriteLine($"[Template Export] Products: {products.Count}");
+            
+            // Analyze which attributes are missing from the template
+            if (products.Count > 0)
+            {
+                Console.WriteLine($"\n[Template Export] Analyzing attribute coverage...");
+                var allScrapedAttributes = new HashSet<string>();
+                foreach (var product in products)
+                {
+                    foreach (var key in product.Attributes.Keys)
+                    {
+                        allScrapedAttributes.Add(key);
+                    }
+                }
+                
+                var templateAttributeKeys = template.Columns
+                    .Where(c => c.Mapping?.Field == ProductField.DynamicAttribute && !string.IsNullOrEmpty(c.Mapping.AttributeKey))
+                    .Select(c => c.Mapping!.AttributeKey!)
+                    .ToList();
+                
+                var unmappedAttributes = allScrapedAttributes
+                    .Where(scrapedKey => !templateAttributeKeys.Any(templateKey =>
+                        scrapedKey.Equals(templateKey, StringComparison.OrdinalIgnoreCase) ||
+                        scrapedKey.Contains(templateKey, StringComparison.OrdinalIgnoreCase) ||
+                        templateKey.Contains(scrapedKey, StringComparison.OrdinalIgnoreCase)))
+                    .OrderBy(k => k)
+                    .ToList();
+                
+                if (unmappedAttributes.Any())
+                {
+                    Console.WriteLine($"\n??  WARNING: {unmappedAttributes.Count} scraped attributes are NOT mapped in the template:");
+                    foreach (var attr in unmappedAttributes)
+                    {
+                        // Show example value from first product
+                        var exampleProduct = products.FirstOrDefault(p => p.Attributes.ContainsKey(attr));
+                        var exampleValue = exampleProduct?.Attributes[attr] ?? "";
+                        if (exampleValue.Length > 50) exampleValue = exampleValue.Substring(0, 50) + "...";
+                        Console.WriteLine($"   ? '{attr}' (example: '{exampleValue}')");
+                    }
+                    Console.WriteLine($"\n?? TIP: Add these attributes to your template to avoid data loss!\n");
+                }
+                else
+                {
+                    Console.WriteLine($"? All scraped attributes are mapped in the template!");
+                }
+            }
 
             using var package = new ExcelPackage();
             var worksheet = package.Workbook.Worksheets.Add("Products");

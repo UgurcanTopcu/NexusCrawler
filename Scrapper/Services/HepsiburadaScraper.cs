@@ -43,11 +43,11 @@ public class HepsiburadaScraper : IDisposable
         }
     }
 
-    public async Task<List<string>> GetProductLinksAsync(string categoryUrl)
+    public async Task<List<string>> GetProductLinksAsync(string categoryUrl, int maxProducts = 50, Func<int, string, string, Task>? onProgress = null)
     {
         if (Method == ScrapeMethod.ScrapeDo)
         {
-            return await _scrapeDoService!.GetProductLinksAsync(categoryUrl, isHepsiburada: true);
+            return await _scrapeDoService!.GetProductLinksAsync(categoryUrl, maxProducts, isHepsiburada: true);
         }
 
         var productLinks = new List<string>();
@@ -55,115 +55,173 @@ public class HepsiburadaScraper : IDisposable
         try
         {
             InitializeDriver();
-            Console.WriteLine($"Navigating to: {categoryUrl}");
-            _driver!.Navigate().GoToUrl(categoryUrl);
             
-            var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(15));
+            // Parse URL to preserve existing query parameters
+            var uri = new Uri(categoryUrl.StartsWith("http") ? categoryUrl : "https://" + categoryUrl);
+            var basePath = uri.GetLeftPart(UriPartial.Path);
+            var existingParams = System.Web.HttpUtility.ParseQueryString(uri.Query);
             
-            try
-            {
-                Console.WriteLine("Waiting for product cards to load...");
-                wait.Until(d => d.FindElements(By.CssSelector("[class*='productCardLink']")).Count > 0);
-                Console.WriteLine($"Initial load: Found {_driver.FindElements(By.CssSelector("[class*='productCardLink']")).Count} product cards");
-            }
-            catch 
-            {
-                Console.WriteLine("Warning: Timeout waiting for product cards");
-            }
+            // Remove pagination parameter if it exists
+            existingParams.Remove("sayfa");
             
-            // Scroll to load more products
-            Console.WriteLine("Scrolling to load more products...");
-            for (int i = 0; i < 10; i++)
+            Console.WriteLine("\n[Hepsiburada] Starting product discovery...");
+            Console.WriteLine($"[Hepsiburada] Target: {maxProducts} products");
+            Console.Out.Flush();
+            
+            if (onProgress != null)
             {
-                ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
-                await Task.Delay(800); // Increased from 500ms
-                Console.WriteLine($"Scroll {i + 1}/10 completed");
+                await onProgress(5, $"?? Finding products (target: {maxProducts})...", "info");
             }
             
-            await Task.Delay(1500); // Extra wait for final content to load
-
-            Console.WriteLine("Extracting product links...");
-            // Use JavaScript to get all product card links more reliably
-            var jsExecutor = (IJavaScriptExecutor)_driver;
-            var productUrls = jsExecutor.ExecuteScript(@"
-                var links = [];
-                // Find all product card links
-                var productCardLinks = document.querySelectorAll('a[class*=""productCardLink""]');
-                console.log('Found ' + productCardLinks.length + ' product card links');
-                productCardLinks.forEach(function(link) {
-                    var href = link.href;
-                    if (href && href.includes('-p-')) {
-                        links.push(href);
-                    }
-                });
-                return links.join('|||');
-            ");
+            int page = 1;
+            int maxPages = Math.Max(30, (maxProducts / 20) + 5);
+            int previousCount = 0;
+            int emptyPageCount = 0;
             
-            if (productUrls != null && !string.IsNullOrWhiteSpace(productUrls.ToString()))
+            while (page <= maxPages && productLinks.Count < maxProducts)
             {
-                var urls = productUrls.ToString()!.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
-                Console.WriteLine($"JavaScript extraction returned {urls.Length} URLs");
+                // Build paginated URL preserving existing parameters
+                string paginatedUrl;
+                var pageParams = System.Web.HttpUtility.ParseQueryString(existingParams.ToString());
                 
-                foreach (var url in urls)
+                if (page > 1)
                 {
-                    var cleanUrl = url.Split('?')[0];
-                    
-                    // Hepsiburada pattern: ends with -pm-PRODUCTCODE or -p-PRODUCTCODE
-                    if (Regex.IsMatch(cleanUrl, @"-(pm|p)-[A-Z0-9]+$"))
+                    pageParams["sayfa"] = page.ToString();
+                }
+                
+                paginatedUrl = pageParams.Count > 0 ? $"{basePath}?{pageParams}" : basePath;
+                
+                Console.WriteLine($"[Hepsiburada] Page {page}...");
+                Console.Out.Flush();
+                
+                _driver!.Navigate().GoToUrl(paginatedUrl);
+                
+                var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(15));
+                
+                try
+                {
+                    wait.Until(d => d.FindElements(By.CssSelector("[class*='productCardLink']")).Count > 0);
+                }
+                catch 
+                {
+                    emptyPageCount++;
+                    if (emptyPageCount >= 2)
                     {
-                        if (!productLinks.Contains(cleanUrl))
+                        Console.WriteLine($"[Hepsiburada] No more products available");
+                        Console.Out.Flush();
+                        break;
+                    }
+                    page++;
+                    continue;
+                }
+                
+                // Scroll to load lazy content
+                for (int i = 0; i < 5; i++)
+                {
+                    ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
+                    await Task.Delay(400);
+                }
+                
+                await Task.Delay(500);
+
+                // Extract links from current page
+                var jsExecutor = (IJavaScriptExecutor)_driver;
+                var productUrls = jsExecutor.ExecuteScript(@"
+                    var links = [];
+                    var productCardLinks = document.querySelectorAll('a[class*=""productCardLink""]');
+                    productCardLinks.forEach(function(link) {
+                        var href = link.href;
+                        if (href && href.includes('-p-')) {
+                            links.push(href);
+                        }
+                    });
+                    return links.join('|||');
+                ");
+                
+                int newLinksOnPage = 0;
+                
+                if (productUrls != null && !string.IsNullOrWhiteSpace(productUrls.ToString()))
+                {
+                    var urls = productUrls.ToString()!.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
+                    
+                    foreach (var url in urls)
+                    {
+                        if (productLinks.Count >= maxProducts) break;
+                        
+                        var cleanUrl = url.Split('?')[0];
+                        
+                        if (Regex.IsMatch(cleanUrl, @"-(pm|p)-[A-Z0-9]+$"))
                         {
-                            productLinks.Add(cleanUrl);
+                            if (!productLinks.Contains(cleanUrl))
+                            {
+                                productLinks.Add(cleanUrl);
+                                newLinksOnPage++;
+                                
+                                // Show LIVE count on console
+                                Console.Write($"\r[Hepsiburada] Found: {productLinks.Count}/{maxProducts} products   ");
+                                Console.Out.Flush();
+                                
+                                // Send to UI every 5 products or at target
+                                if (onProgress != null && (productLinks.Count % 5 == 0 || productLinks.Count == maxProducts))
+                                {
+                                    var progressPercent = Math.Min(5 + (int)((productLinks.Count / (double)maxProducts) * 5), 10);
+                                    await onProgress(progressPercent, $"?? Found {productLinks.Count}/{maxProducts} products", "info");
+                                }
+                            }
                         }
                     }
-                    else
+                }
+                
+                Console.WriteLine(); // New line after the count
+                Console.Out.Flush();
+                
+                // Check if we reached target
+                if (productLinks.Count >= maxProducts)
+                {
+                    Console.WriteLine($"[Hepsiburada] ? Target reached!");
+                    Console.Out.Flush();
+                    if (onProgress != null)
                     {
-                        Console.WriteLine($"  Rejected (pattern mismatch): {cleanUrl}");
+                        await onProgress(10, $"? Found all {productLinks.Count} product URLs!", "success");
+                    }
+                    break;
+                }
+                
+                // Check for empty pages
+                if (productLinks.Count == previousCount)
+                {
+                    emptyPageCount++;
+                    if (emptyPageCount >= 2)
+                    {
+                        Console.WriteLine($"[Hepsiburada] ? End of available products");
+                        Console.Out.Flush();
+                        if (onProgress != null && productLinks.Count > 0)
+                        {
+                            await onProgress(10, $"? Found {productLinks.Count} products (all available)", "success");
+                        }
+                        break;
                     }
                 }
-            }
-            else
-            {
-                Console.WriteLine("ERROR: JavaScript extraction returned null or empty!");
+                else
+                {
+                    emptyPageCount = 0;
+                    previousCount = productLinks.Count;
+                }
+                
+                page++;
+                await Task.Delay(300);
             }
             
-            Console.WriteLine($"Found {productLinks.Count} unique product links");
+            Console.WriteLine($"\n[Hepsiburada] ? Total: {productLinks.Count} products from {page - 1} pages\n");
+            Console.Out.Flush();
             
             // Debug: Print first few links
             if (productLinks.Count > 0)
             {
                 Console.WriteLine("Sample product links:");
-                foreach (var link in productLinks.Take(5))
+                foreach (var link in productLinks.Take(3))
                 {
                     Console.WriteLine($"  - {link}");
-                }
-            }
-            else
-            {
-                Console.WriteLine("ERROR: No product links found!");
-                
-                // Emergency fallback: Try Selenium's FindElements
-                Console.WriteLine("Trying Selenium FindElements fallback...");
-                var linkElements = _driver.FindElements(By.CssSelector("a[class*='productCardLink']"));
-                Console.WriteLine($"Found {linkElements.Count} elements via Selenium");
-                
-                foreach (var element in linkElements.Take(10))
-                {
-                    try
-                    {
-                        var href = element.GetAttribute("href");
-                        Console.WriteLine($"  Element href: {href}");
-                        if (!string.IsNullOrEmpty(href) && href.Contains("-p-"))
-                        {
-                            var cleanUrl = href.Split('?')[0];
-                            // Hepsiburada pattern: ends with -pm-CODE or -p-CODE
-                            if (Regex.IsMatch(cleanUrl, @"-(pm|p)-[A-Z0-9]+$") && !productLinks.Contains(cleanUrl))
-                            {
-                                productLinks.Add(cleanUrl);
-                            }
-                        }
-                    }
-                    catch { }
                 }
             }
         }
@@ -171,6 +229,10 @@ public class HepsiburadaScraper : IDisposable
         {
             Console.WriteLine($"Error fetching product links: {ex.Message}");
             Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            if (onProgress != null)
+            {
+                await onProgress(10, $"? Error finding products: {ex.Message}", "error");
+            }
         }
 
         return productLinks;
@@ -660,7 +722,7 @@ public class HepsiburadaScraper : IDisposable
     {
         var products = new List<ProductInfo>();
         
-        var productLinks = await GetProductLinksAsync(categoryUrl);
+        var productLinks = await GetProductLinksAsync(categoryUrl, maxProducts);
         
         var linksToProcess = productLinks.Take(maxProducts).ToList();
         Console.WriteLine($"\nProcessing {linksToProcess.Count} products...\n");

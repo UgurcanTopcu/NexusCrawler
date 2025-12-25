@@ -9,13 +9,23 @@ public class ImageProcessingService
 {
     private readonly HttpClient _httpClient;
     private readonly FtpUploadService _ftpService;
+    private readonly CdnCacheService _cdnCache;
     private const int TargetSize = 1000;
 
-    public ImageProcessingService(HttpClient httpClient, FtpUploadService ftpService)
+    public ImageProcessingService(HttpClient httpClient, FtpUploadService ftpService, CdnCacheService cdnCache)
     {
         _httpClient = httpClient;
-        _httpClient.Timeout = TimeSpan.FromSeconds(30); // 30 second timeout
+        _httpClient.Timeout = TimeSpan.FromSeconds(30);
         _ftpService = ftpService;
+        _cdnCache = cdnCache;
+    }
+
+    /// <summary>
+    /// Initialize the CDN cache - call this once before processing any products
+    /// </summary>
+    public async Task InitializeCacheAsync()
+    {
+        await _cdnCache.InitializeCacheAsync();
     }
 
     public async Task<string?> ProcessAndUploadImageAsync(string imageUrl, ProductInfo product, int imageIndex = 0)
@@ -89,28 +99,24 @@ public class ImageProcessingService
                 return (null, new List<string>());
             }
             
-            // **NEW: Check CDN cache first**
-            var cdnConfig = new CdnFtpConfig();
-            var cdnCache = new CdnCacheService(cdnConfig);  // Uses its own HttpClient now
-            
-            await (onProgressMessage?.Invoke($"?? Checking CDN cache for existing images...") ?? Task.CompletedTask);
-            
-            var (existingMain, existingAdditional) = await cdnCache.FindExistingImagesAsync(
-                product.Source, 
-                product.ProductId, 
-                maxImagesToCheck: 3  // Only check for 3 images
-            );
-            
-            if (existingMain != null)
+            // **FAST LOOKUP: Check CDN cache using pre-fetched folder list**
+            if (_cdnCache.ProductExistsInCache(product.Source, product.ProductId))
             {
-                await (onProgressMessage?.Invoke($"? Found {existingAdditional.Count + 1} existing images on CDN, skipping upload") ?? Task.CompletedTask);
-                Console.WriteLine($"[Image Processing] ? Using cached images for {product.Source}/{product.ProductId}");
-                return (existingMain, existingAdditional);
+                Console.WriteLine($"[Image Processing] ? CACHE HIT: {product.Source}/{product.ProductId}");
+                
+                // Generate URLs from cache (no HTTP requests needed)
+                var cachedMain = _cdnCache.GenerateCdnUrl(product.Source, product.ProductId, 0);
+                var cachedAdditional = new List<string>();
+                for (int i = 1; i < 3; i++)
+                {
+                    cachedAdditional.Add(_cdnCache.GenerateCdnUrl(product.Source, product.ProductId, i));
+                }
+                
+                await (onProgressMessage?.Invoke($"? Found cached images on CDN, skipping upload") ?? Task.CompletedTask);
+                return (cachedMain, cachedAdditional);
             }
-            else
-            {
-                Console.WriteLine($"[Image Processing] No cached images found, proceeding with upload...");
-            }
+            
+            Console.WriteLine($"[Image Processing] CACHE MISS: {product.Source}/{product.ProductId} - will upload");
 
             // Get all image URLs
             var allImageUrls = product.GetAllImages();
@@ -126,7 +132,7 @@ public class ImageProcessingService
             const int MaxImagesToProcess = 3;
             var imagesToProcess = allImageUrls.Take(MaxImagesToProcess).ToList();
             
-            Console.WriteLine($"[Image Processing] Processing {imagesToProcess.Count} of {allImageUrls.Count} images for {product.Source}/{product.ProductId} (limited to {MaxImagesToProcess})");
+            Console.WriteLine($"[Image Processing] Processing {imagesToProcess.Count} of {allImageUrls.Count} images (limited to {MaxImagesToProcess})");
             await (onProgressMessage?.Invoke($"??? Processing {imagesToProcess.Count} images...") ?? Task.CompletedTask);
 
             int successCount = 0;
@@ -166,6 +172,12 @@ public class ImageProcessingService
                     failCount++;
                     Console.WriteLine($"[Image Processing] ? Additional image {i + 1} upload failed");
                 }
+            }
+
+            // Add to cache after successful upload
+            if (successCount > 0)
+            {
+                _cdnCache.AddToCache(product.Source, product.ProductId);
             }
 
             var statusMsg = $"? Uploaded {successCount}/{imagesToProcess.Count} images to CDN";
@@ -209,7 +221,7 @@ public class ImageProcessingService
                     
                     if (attempt < maxRetries)
                     {
-                        await Task.Delay(1000 * attempt); // Exponential backoff
+                        await Task.Delay(1000 * attempt);
                         continue;
                     }
                     return null;
@@ -217,14 +229,12 @@ public class ImageProcessingService
 
                 var imageData = await response.Content.ReadAsByteArrayAsync();
                 
-                // Validate image data
                 if (imageData == null || imageData.Length == 0)
                 {
                     Console.WriteLine($"Downloaded empty image data from: {imageUrl}");
                     return null;
                 }
 
-                // Check minimum size (at least 1KB)
                 if (imageData.Length < 1024)
                 {
                     Console.WriteLine($"Downloaded image too small ({imageData.Length} bytes): {imageUrl}");
@@ -268,7 +278,6 @@ public class ImageProcessingService
     {
         try
         {
-            // Validate input
             if (imageData == null || imageData.Length == 0)
             {
                 Console.WriteLine("Cannot resize: Empty image data");
@@ -294,24 +303,21 @@ public class ImageProcessingService
 
             using (image)
             {
-                // Resize to 1000x1000 maintaining aspect ratio
                 image.Mutate(x => x.Resize(new ResizeOptions
                 {
                     Size = new Size(TargetSize, TargetSize),
-                    Mode = ResizeMode.Max // Maintains aspect ratio, fits within 1000x1000
+                    Mode = ResizeMode.Max
                 }));
 
-                // If image is smaller than 1000x1000, pad it
                 if (image.Width < TargetSize || image.Height < TargetSize)
                 {
                     image.Mutate(x => x.Pad(TargetSize, TargetSize, Color.White));
                 }
 
-                // Save to memory stream with JPEG encoding
                 using var outputStream = new MemoryStream();
                 await image.SaveAsJpegAsync(outputStream, new JpegEncoder
                 {
-                    Quality = 90 // High quality
+                    Quality = 90
                 });
 
                 return outputStream.ToArray();
@@ -322,24 +328,5 @@ public class ImageProcessingService
             Console.WriteLine($"Resize error: {ex.Message}");
             return null;
         }
-    }
-
-    private string SanitizeFileName(string fileName)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var sanitized = string.Join("_", fileName.Split(invalid, StringSplitOptions.RemoveEmptyEntries));
-        
-        if (sanitized.Length > 50)
-            sanitized = sanitized.Substring(0, 50);
-        
-        sanitized = sanitized.Replace(" ", "_")
-                             .Replace("þ", "s").Replace("Þ", "S")
-                             .Replace("ý", "i").Replace("Ý", "I")
-                             .Replace("ð", "g").Replace("Ð", "G")
-                             .Replace("ü", "u").Replace("Ü", "U")
-                             .Replace("ö", "o").Replace("Ö", "O")
-                             .Replace("ç", "c").Replace("Ç", "C");
-
-        return sanitized.ToLower();
     }
 }
