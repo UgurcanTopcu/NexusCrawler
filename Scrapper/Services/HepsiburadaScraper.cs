@@ -61,10 +61,14 @@ public class HepsiburadaScraper : IDisposable
             var basePath = uri.GetLeftPart(UriPartial.Path);
             var existingParams = System.Web.HttpUtility.ParseQueryString(uri.Query);
             
+            // Check if this is a search URL (/ara)
+            bool isSearchUrl = basePath.Contains("/ara");
+            
             // Remove pagination parameter if it exists
             existingParams.Remove("sayfa");
             
             Console.WriteLine("\n[Hepsiburada] Starting product discovery...");
+            Console.WriteLine($"[Hepsiburada] URL Type: {(isSearchUrl ? "Search" : "Category")}");
             Console.WriteLine($"[Hepsiburada] Target: {maxProducts} products");
             Console.Out.Flush();
             
@@ -89,21 +93,31 @@ public class HepsiburadaScraper : IDisposable
                     pageParams["sayfa"] = page.ToString();
                 }
                 
+                // For search URLs, we MUST keep the query params (q=, filtreler=, etc.)
                 paginatedUrl = pageParams.Count > 0 ? $"{basePath}?{pageParams}" : basePath;
                 
-                Console.WriteLine($"[Hepsiburada] Page {page}...");
+                Console.WriteLine($"[Hepsiburada] Page {page}: {paginatedUrl.Substring(0, Math.Min(100, paginatedUrl.Length))}...");
                 Console.Out.Flush();
                 
                 _driver!.Navigate().GoToUrl(paginatedUrl);
                 
                 var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(15));
                 
+                // Try multiple selectors - search pages may use different CSS classes
+                bool foundProducts = false;
                 try
                 {
-                    wait.Until(d => d.FindElements(By.CssSelector("[class*='productCardLink']")).Count > 0);
+                    // Wait for any product link to appear
+                    wait.Until(d => 
+                        d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0 ||
+                        d.FindElements(By.CssSelector("[class*='productCardLink']")).Count > 0 ||
+                        d.FindElements(By.CssSelector("[data-test-id='product-card-item']")).Count > 0
+                    );
+                    foundProducts = true;
                 }
                 catch 
                 {
+                    Console.WriteLine($"[Hepsiburada] No products found on page {page}");
                     emptyPageCount++;
                     if (emptyPageCount >= 2)
                     {
@@ -115,26 +129,71 @@ public class HepsiburadaScraper : IDisposable
                     continue;
                 }
                 
-                // Scroll to load lazy content
-                for (int i = 0; i < 5; i++)
+                // Scroll to load lazy content - more aggressive scrolling
+                for (int i = 0; i < 8; i++)
                 {
-                    ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
-                    await Task.Delay(400);
+                    ((IJavaScriptExecutor)_driver).ExecuteScript($"window.scrollTo(0, document.body.scrollHeight * {(i + 1) * 0.125});");
+                    await Task.Delay(300);
                 }
                 
+                // Scroll back to top and then to bottom again
+                ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, 0);");
+                await Task.Delay(200);
+                ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
                 await Task.Delay(500);
 
-                // Extract links from current page
+                // Extract links from current page using multiple methods
                 var jsExecutor = (IJavaScriptExecutor)_driver;
                 var productUrls = jsExecutor.ExecuteScript(@"
                     var links = [];
-                    var productCardLinks = document.querySelectorAll('a[class*=""productCardLink""]');
-                    productCardLinks.forEach(function(link) {
+                    var seen = {};
+                    
+                    // Method 1: productCardLink class (category pages)
+                    document.querySelectorAll('a[class*=""productCardLink""]').forEach(function(link) {
                         var href = link.href;
-                        if (href && href.includes('-p-')) {
+                        if (href && href.includes('-p-') && !seen[href]) {
+                            seen[href] = true;
                             links.push(href);
                         }
                     });
+                    
+                    // Method 2: Any link with -p- pattern (search pages)
+                    document.querySelectorAll('a[href*=""-p-""]').forEach(function(link) {
+                        var href = link.href;
+                        if (href && href.includes('-p-') && !seen[href]) {
+                            seen[href] = true;
+                            links.push(href);
+                        }
+                    });
+                    
+                    // Method 3: Product card items with data-test-id
+                    document.querySelectorAll('[data-test-id=""product-card-item""] a').forEach(function(link) {
+                        var href = link.href;
+                        if (href && href.includes('-p-') && !seen[href]) {
+                            seen[href] = true;
+                            links.push(href);
+                        }
+                    });
+                    
+                    // Method 4: moria-ProductCard links (newer Hepsiburada pages)
+                    document.querySelectorAll('[class*=""moria-ProductCard""] a').forEach(function(link) {
+                        var href = link.href;
+                        if (href && href.includes('-p-') && !seen[href]) {
+                            seen[href] = true;
+                            links.push(href);
+                        }
+                    });
+                    
+                    // Method 5: product-card class
+                    document.querySelectorAll('[class*=""product-card""] a').forEach(function(link) {
+                        var href = link.href;
+                        if (href && href.includes('-p-') && !seen[href]) {
+                            seen[href] = true;
+                            links.push(href);
+                        }
+                    });
+                    
+                    console.log('Found ' + links.length + ' product links');
                     return links.join('|||');
                 ");
                 
@@ -143,6 +202,7 @@ public class HepsiburadaScraper : IDisposable
                 if (productUrls != null && !string.IsNullOrWhiteSpace(productUrls.ToString()))
                 {
                     var urls = productUrls.ToString()!.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
+                    Console.WriteLine($"[Hepsiburada] Raw links found on page: {urls.Length}");
                     
                     foreach (var url in urls)
                     {
@@ -150,7 +210,8 @@ public class HepsiburadaScraper : IDisposable
                         
                         var cleanUrl = url.Split('?')[0];
                         
-                        if (Regex.IsMatch(cleanUrl, @"-(pm|p)-[A-Z0-9]+$"))
+                        // Match both -p- and -pm- patterns
+                        if (Regex.IsMatch(cleanUrl, @"-(pm?)-[A-Z0-9]+$", RegexOptions.IgnoreCase))
                         {
                             if (!productLinks.Contains(cleanUrl))
                             {
@@ -173,6 +234,7 @@ public class HepsiburadaScraper : IDisposable
                 }
                 
                 Console.WriteLine(); // New line after the count
+                Console.WriteLine($"[Hepsiburada] Page {page} added {newLinksOnPage} new products");
                 Console.Out.Flush();
                 
                 // Check if we reached target
@@ -209,7 +271,7 @@ public class HepsiburadaScraper : IDisposable
                 }
                 
                 page++;
-                await Task.Delay(300);
+                await Task.Delay(500); // Slightly longer delay between pages
             }
             
             Console.WriteLine($"\n[Hepsiburada] ? Total: {productLinks.Count} products from {page - 1} pages\n");

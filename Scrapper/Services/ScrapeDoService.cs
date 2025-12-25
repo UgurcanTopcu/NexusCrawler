@@ -60,13 +60,18 @@ public class ScrapeDoService
         
         var productLinks = new List<string>();
         
-        // Parse URL to preserve existing query parameters (like sst=BEST_SELLER)
+        // Parse URL to preserve existing query parameters (like sst=BEST_SELLER or q=laptop)
         var uri = new Uri(categoryUrl.StartsWith("http") ? categoryUrl : "https://" + categoryUrl);
         var basePath = uri.GetLeftPart(UriPartial.Path);
         var existingParams = System.Web.HttpUtility.ParseQueryString(uri.Query);
         
+        // Check if this is a search URL (/ara for Hepsiburada)
+        bool isSearchUrl = isHepsiburada && basePath.Contains("/ara");
+        
         // Remove pagination parameter if it exists
         existingParams.Remove(isHepsiburada ? "sayfa" : "pi");
+        
+        Console.WriteLine($"[{platform}] URL Type: {(isSearchUrl ? "Search" : "Category")}");
         
         // Calculate max pages needed
         int maxPages = Math.Max(30, (maxProducts / 20) + 5);
@@ -86,9 +91,10 @@ public class ScrapeDoService
                     pageParams[isHepsiburada ? "sayfa" : "pi"] = page.ToString();
                 }
                 
+                // For search URLs, we MUST keep the query params (q=, filtreler=, etc.)
                 paginatedUrl = pageParams.Count > 0 ? $"{basePath}?{pageParams}" : basePath;
                 
-                Console.WriteLine($"[{platform}] Page {page}...");
+                Console.WriteLine($"[{platform}] Page {page}: {paginatedUrl.Substring(0, Math.Min(80, paginatedUrl.Length))}...");
                 Console.Out.Flush();
                 
                 var html = await GetPageHtmlAsync(paginatedUrl);
@@ -100,10 +106,13 @@ public class ScrapeDoService
                 // Find all product links
                 if (isHepsiburada)
                 {
+                    // Multiple selectors for Hepsiburada (both category and search pages)
                     var linkNodes = htmlDoc.DocumentNode.SelectNodes("//a[contains(@href, '-p-')]");
                     
                     if (linkNodes != null && linkNodes.Count > 0)
                     {
+                        Console.WriteLine($"[{platform}] Raw links on page: {linkNodes.Count}");
+                        
                         foreach (var node in linkNodes)
                         {
                             if (productLinks.Count >= maxProducts) break;
@@ -111,7 +120,8 @@ public class ScrapeDoService
                             var href = node.GetAttributeValue("href", "");
                             if (!string.IsNullOrEmpty(href) && href.Contains("-p-"))
                             {
-                                if (Regex.IsMatch(href, @"-p-[A-Z0-9]+"))
+                                // Match both -p- and -pm- patterns
+                                if (Regex.IsMatch(href, @"-(pm?)-[A-Z0-9]+", RegexOptions.IgnoreCase))
                                 {
                                     var fullUrl = href.StartsWith("http") ? href : "https://www.hepsiburada.com" + href;
                                     var cleanUrl = fullUrl.Split('?')[0];
@@ -127,6 +137,10 @@ public class ScrapeDoService
                                 }
                             }
                         }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[{platform}] No links with -p- pattern found on page");
                     }
                 }
                 else
@@ -163,6 +177,7 @@ public class ScrapeDoService
                 Console.Out.Flush();
                 
                 int newLinks = productLinks.Count - linksBeforePage;
+                Console.WriteLine($"[{platform}] Page {page} added {newLinks} new products");
                 
                 // Check if we reached target
                 if (productLinks.Count >= maxProducts)
