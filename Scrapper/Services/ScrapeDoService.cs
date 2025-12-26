@@ -78,6 +78,31 @@ public class ScrapeDoService
                 
                 var linkNodes = htmlDoc.DocumentNode.SelectNodes("//a[contains(@href, '-p-')]");
                 
+                // For Trendyol: Get ad product links from widget-container to exclude
+                var adLinks = new HashSet<string>();
+                if (!isHepsiburada)
+                {
+                    var adNodes = htmlDoc.DocumentNode.SelectNodes("//div[contains(@class, 'widget-container')]//a[contains(@href, '-p-')]");
+                    if (adNodes != null)
+                    {
+                        foreach (var adNode in adNodes)
+                        {
+                            var adHref = adNode.GetAttributeValue("href", "");
+                            if (!string.IsNullOrEmpty(adHref))
+                            {
+                                var adCleanUrl = adHref.Split('?')[0];
+                                if (adCleanUrl.StartsWith("/")) adCleanUrl = "https://www.trendyol.com" + adCleanUrl;
+                                adLinks.Add(adCleanUrl);
+                            }
+                        }
+                    }
+                    
+                    if (adLinks.Count > 0)
+                    {
+                        Console.WriteLine($"[{platform}] Excluding {adLinks.Count} ad products from widget-container");
+                    }
+                }
+                
                 if (linkNodes != null)
                 {
                     foreach (var node in linkNodes)
@@ -94,6 +119,12 @@ public class ScrapeDoService
                         var baseUrl = isHepsiburada ? "https://www.hepsiburada.com" : "https://www.trendyol.com";
                         var fullUrl = href.StartsWith("http") ? href : baseUrl + href;
                         var cleanUrl = fullUrl.Split('?')[0];
+                        
+                        // Skip ad products for Trendyol
+                        if (!isHepsiburada && adLinks.Contains(cleanUrl))
+                        {
+                            continue;
+                        }
                         
                         if (!productLinks.Contains(cleanUrl))
                         {

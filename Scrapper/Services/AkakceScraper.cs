@@ -731,7 +731,13 @@ public class AkakceScraper : IDisposable
                 var count = CountJsonArray(jsonLdData.ToString()!);
                 Console.WriteLine($"[Akakce] Found {count} sellers in JSON-LD structured data");
                 ParseJsonLdPrices(jsonLdData.ToString()!, product);
-                if (product.Sellers.Count > 0) return;
+                
+                // Enrich with DOM data if we have sellers but missing names
+                if (product.Sellers.Count > 0)
+                {
+                    await EnrichSellerNamesViaDom(product);
+                    return;
+                }
             }
             
             // Method 2: Try qvPrices JavaScript variable
@@ -757,7 +763,13 @@ public class AkakceScraper : IDisposable
                 var count = CountJsonArray(pricesJson.ToString()!);
                 Console.WriteLine($"[Akakce] Found {count} sellers in qvPrices");
                 ParseQvPricesJson(pricesJson.ToString()!, product);
-                if (product.Sellers.Count > 0) return;
+                
+                // Enrich with DOM data since qvPrices lacks seller names
+                if (product.Sellers.Count > 0)
+                {
+                    await EnrichSellerNamesViaDom(product);
+                    return;
+                }
             }
             
             // Method 3: DOM extraction fallback
@@ -783,17 +795,73 @@ public class AkakceScraper : IDisposable
                         marketplace = img.alt.trim();
                     }
                     
+                    // Find seller name - look for '/SellerName' pattern
+                    var sellerName = '';
+                    
+                    // Method 1: Find elements that start with '/'
+                    var allElements = item.querySelectorAll('a span, a b, a > *');
+                    for (var i = 0; i < allElements.length; i++) {
+                        var el = allElements[i];
+                        var elText = (el.textContent || '').trim();
+                        
+                        if (elText.startsWith('/') && elText.length > 1 && elText.length < 60) {
+                            var candidate = elText.substring(1).trim();
+                            candidate = candidate.split('\n')[0].trim();
+                            candidate = candidate.split('Satýcýya')[0].trim();
+                            candidate = candidate.split('Stokta')[0].trim();
+                            candidate = candidate.split('Son güncelleme')[0].trim();
+                            candidate = candidate.split('Kaçýrýlmayacak')[0].trim();
+                            candidate = candidate.split('Bugün')[0].trim();
+                            candidate = candidate.split('Kargo')[0].trim();
+                            
+                            if (candidate && candidate.length > 1 && candidate.length < 50 &&
+                                !candidate.match(/^[0-9]/) && !candidate.includes('TL') &&
+                                !candidate.includes(':') && !candidate.includes('gün')) {
+                                sellerName = candidate;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Method 2: Look at anchor text for '/' pattern
+                    if (!sellerName) {
+                        var anchors = item.querySelectorAll('a[href]');
+                        for (var j = 0; j < anchors.length; j++) {
+                            var anchorText = anchors[j].textContent || '';
+                            var slashIdx = anchorText.indexOf('/');
+                            if (slashIdx > 0 && slashIdx < anchorText.length - 1) {
+                                var afterSlash = anchorText.substring(slashIdx + 1).trim();
+                                afterSlash = afterSlash.split('\n')[0].trim();
+                                afterSlash = afterSlash.split('Satýcýya')[0].trim();
+                                afterSlash = afterSlash.split('Stokta')[0].trim();
+                                afterSlash = afterSlash.split('Son güncelleme')[0].trim();
+                                afterSlash = afterSlash.split('Kaçýrýlmayacak')[0].trim();
+                                afterSlash = afterSlash.split('Bugün')[0].trim();
+                                afterSlash = afterSlash.split('Kargo')[0].trim();
+                                afterSlash = afterSlash.split(' iþ günü')[0].trim();
+                                
+                                if (afterSlash && afterSlash.length > 1 && afterSlash.length < 50 &&
+                                    !afterSlash.match(/^[0-9]/) && !afterSlash.includes('TL') &&
+                                    !afterSlash.includes(':') && !afterSlash.includes('gün') &&
+                                    !afterSlash.includes('Fýrsatlar') && !afterSlash.includes('dakika')) {
+                                    sellerName = afterSlash;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
                     // Get link
-                    var link = '';
+                    var linkUrl = '';
                     var linkEl = item.querySelector('a[href]');
-                    if (linkEl) link = linkEl.href;
+                    if (linkEl) linkUrl = linkEl.href;
                     
                     if (marketplace) {
                         results.push({
                             price: price,
                             marketplace: marketplace,
-                            sellerName: '', // DOM extraction can't reliably get seller name
-                            url: link
+                            sellerName: sellerName,
+                            url: linkUrl
                         });
                     }
                 });
@@ -810,6 +878,224 @@ public class AkakceScraper : IDisposable
         catch (Exception ex)
         {
             Console.WriteLine($"[Akakce] Extraction error: {ex.Message}");
+        }
+        
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Enriches seller data by extracting seller names from DOM
+    /// Useful when JSON-LD or qvPrices provide marketplace but miss seller name
+    /// </summary>
+    private async Task EnrichSellerNamesViaDom(AkakceProductInfo product)
+    {
+        if (_driver == null) return;
+
+        try
+        {
+            var jsExecutor = (IJavaScriptExecutor)_driver;
+            
+            // Extract seller names from DOM - looking specifically for the "/SellerName" pattern
+            // In Akakce, the structure is: <img alt="marketplace"> followed by /sellerName as a direct text or in a specific element
+            var sellerNamesJson = jsExecutor.ExecuteScript(@"
+                var names = [];
+                var items = document.querySelectorAll('#APL li, ul.pl_v8 > li, ul.pl_v9 > li, li.p_w');
+                
+                items.forEach(function(item) {
+                    var sellerName = '';
+                    var marketplace = '';
+                    
+                    // Get marketplace from image alt
+                    var img = item.querySelector('img[alt]');
+                    if (img && img.alt) {
+                        marketplace = img.alt.trim().toLowerCase();
+                    }
+                    
+                    // PRIMARY METHOD: Look for the seller info container that has the /name pattern
+                    // The seller name appears right after the marketplace logo with a '/' prefix
+                    // HTML structure often: <a>...<img alt='n11'>...<span>/btkurumsal</span>...</a>
+                    
+                    // Method 1: Find direct text nodes or spans that start with '/'
+                    var allElements = item.querySelectorAll('a span, a b, a > *');
+                    for (var i = 0; i < allElements.length; i++) {
+                        var el = allElements[i];
+                        var text = (el.textContent || '').trim();
+                        
+                        // Look for text that starts with '/' - this is the seller name indicator
+                        if (text.startsWith('/') && text.length > 1 && text.length < 60) {
+                            var candidate = text.substring(1).trim(); // Remove the leading '/'
+                            
+                            // Clean up: remove any trailing noise
+                            candidate = candidate.split('\n')[0].trim();
+                            candidate = candidate.split('Satýcýya')[0].trim();
+                            candidate = candidate.split('Stokta')[0].trim();
+                            candidate = candidate.split('Son güncelleme')[0].trim();
+                            candidate = candidate.split('Kaçýrýlmayacak')[0].trim();
+                            candidate = candidate.split('Bugün')[0].trim();
+                            candidate = candidate.split('Kargo')[0].trim();
+                            
+                            // Validate: should be alphanumeric, not a price, not a date/time
+                            if (candidate && 
+                                candidate.length > 1 && 
+                                candidate.length < 50 &&
+                                !candidate.match(/^[0-9]/) &&
+                                !candidate.includes('TL') &&
+                                !candidate.includes(':') &&
+                                !candidate.includes('gün') &&
+                                !candidate.includes('adet')) {
+                                sellerName = candidate;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Method 2: If not found, look at anchor text for '/' pattern
+                    if (!sellerName) {
+                        var anchors = item.querySelectorAll('a[href]');
+                        for (var j = 0; j < anchors.length; j++) {
+                            var anchor = anchors[j];
+                            var anchorText = anchor.textContent || '';
+                            
+                            // Find the '/' in the anchor text
+                            var slashIdx = anchorText.indexOf('/');
+                            if (slashIdx > 0 && slashIdx < anchorText.length - 1) {
+                                var afterSlash = anchorText.substring(slashIdx + 1).trim();
+                                
+                                // Take first word/segment
+                                afterSlash = afterSlash.split('\n')[0].trim();
+                                afterSlash = afterSlash.split('Satýcýya')[0].trim();
+                                afterSlash = afterSlash.split('Stokta')[0].trim();
+                                afterSlash = afterSlash.split('Son güncelleme')[0].trim();
+                                afterSlash = afterSlash.split('Kaçýrýlmayacak')[0].trim();
+                                afterSlash = afterSlash.split('Bugün')[0].trim();
+                                afterSlash = afterSlash.split('Kargo')[0].trim();
+                                afterSlash = afterSlash.split(' iþ günü')[0].trim();
+                                
+                                // Validate
+                                if (afterSlash && 
+                                    afterSlash.length > 1 && 
+                                    afterSlash.length < 50 &&
+                                    !afterSlash.match(/^[0-9]/) &&
+                                    !afterSlash.includes('TL') &&
+                                    !afterSlash.includes(':') &&
+                                    !afterSlash.includes('dakika') &&
+                                    !afterSlash.includes('gün') &&
+                                    !afterSlash.includes('adet') &&
+                                    !afterSlash.includes('Fýrsatlar')) {
+                                    sellerName = afterSlash;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Method 3: Last resort - check for span elements near the marketplace logo
+                    if (!sellerName) {
+                        var spans = item.querySelectorAll('span');
+                        for (var k = 0; k < spans.length; k++) {
+                            var span = spans[k];
+                            var spanText = (span.textContent || '').trim();
+                            var spanClass = (span.className || '').toLowerCase();
+                            
+                            // Skip known non-seller patterns
+                            if (!spanText || spanText.length < 2 || spanText.length > 50) continue;
+                            if (spanText.includes('TL') || spanText.includes('kargo')) continue;
+                            if (spanText.includes('Satýcýya') || spanText.includes('Git')) continue;
+                            if (spanText.includes('Stokta') || spanText.includes('adet')) continue;
+                            if (spanText.includes('güncelleme') || spanText.includes('Bugün')) continue;
+                            if (spanText.includes('Kaçýrýlmayacak') || spanText.includes('Fýrsatlar')) continue;
+                            if (spanText.includes('En Ucuz') || spanText.includes('Dahil')) continue;
+                            if (spanText.includes('iþ günü') || spanText.includes('dakika')) continue;
+                            if (spanClass.includes('price') || spanClass.includes('btn')) continue;
+                            if (spanText.match(/^[0-9]{1,2}:[0-9]{2}/)) continue; // Time pattern
+                            if (spanText.match(/^[0-9]{1,3}[\.\,][0-9]{3}/)) continue; // Price pattern
+                            
+                            // Check if it starts with '/'
+                            if (spanText.startsWith('/')) {
+                                sellerName = spanText.substring(1).trim();
+                                break;
+                            }
+                            
+                            // Check if different from marketplace and looks like a name
+                            if (spanText.toLowerCase() !== marketplace &&
+                                spanText.match(/^[A-Za-z0-9ýðüþöçÝÐÜÞÖÇ]/)) {
+                                // Could be seller name, but be cautious
+                                // Only use if no better option
+                            }
+                        }
+                    }
+                    
+                    names.push(sellerName);
+                });
+                
+                return JSON.stringify(names);
+            ");
+            
+            if (sellerNamesJson != null)
+            {
+                var names = System.Text.Json.JsonSerializer.Deserialize<List<string>>(sellerNamesJson.ToString()!);
+                
+                if (names != null && names.Count > 0)
+                {
+                    Console.WriteLine($"[Akakce] Found {names.Count} potential names in DOM for enrichment");
+                    
+                    int enrichedCount = 0;
+                    int skippedCount = 0;
+                    foreach (var seller in product.Sellers)
+                    {
+                        // Only enrich if SellerName is empty
+                        if (string.IsNullOrEmpty(seller.SellerName) && seller.Rank <= names.Count)
+                        {
+                            var domName = names[seller.Rank - 1];
+                            
+                            // Validate the name - must not be noise
+                            bool isValid = !string.IsNullOrWhiteSpace(domName) &&
+                                !domName.Equals(seller.Marketplace, StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("Satýcýya", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("Kaçýrýlmayacak", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("Fýrsatlar", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("güncelleme", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("En Ucuz", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("Kargo", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("Bugün", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("iþ günü", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("dakika", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("adet", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains(":", StringComparison.OrdinalIgnoreCase) &&
+                                domName.Length >= 2 &&
+                                domName.Length < 50 &&
+                                !Regex.IsMatch(domName, @"^\d");
+                            
+                            if (isValid)
+                            {
+                                seller.SellerName = domName;
+                                enrichedCount++;
+                                if (enrichedCount <= 3)
+                                {
+                                    Console.WriteLine($"[Akakce] Enriched Seller {seller.Rank}: {seller.Marketplace} -> {seller.SellerName}");
+                                }
+                            }
+                            else
+                            {
+                                skippedCount++;
+                            }
+                        }
+                    }
+                    
+                    if (enrichedCount > 3)
+                    {
+                        Console.WriteLine($"[Akakce] ... and {enrichedCount - 3} more sellers enriched");
+                    }
+                    if (skippedCount > 0)
+                    {
+                        Console.WriteLine($"[Akakce] Skipped {skippedCount} invalid/noise values");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Akakce] Enrichment error: {ex.Message}");
         }
         
         await Task.CompletedTask;
@@ -1061,8 +1347,15 @@ public class AkakceScraper : IDisposable
                     seller.Marketplace = marketplaceEl.GetString() ?? "";
                 }
                 
-                // Seller name from DOM is unreliable, leave empty
-                seller.SellerName = "";
+                // Get seller name
+                if (priceItem.TryGetProperty("sellerName", out var sellerNameEl))
+                {
+                    seller.SellerName = sellerNameEl.GetString() ?? "";
+                }
+                else
+                {
+                    seller.SellerName = "";
+                }
 
                 // Get URL
                 if (priceItem.TryGetProperty("url", out var urlEl))

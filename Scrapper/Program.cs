@@ -268,6 +268,8 @@ app.MapGet("/", () => Results.Content("""
                     <option value="trendyol_laptop">💻 Trendyol Laptop (MediaMarkt)</option>
                     <option value="trendyol_robot_vacuum">🤖 Trendyol Robot Vacuum (MediaMarkt)</option>
                     <option value="trendyol_dryer">🌀 Trendyol Dryer (MediaMarkt)</option>
+                    <option value="trendyol_klima">🌡️ Trendyol Klima (MediaMarkt)</option>
+                    <option value="trendyol_water_heater">🚿 Trendyol Şofben (MediaMarkt)</option>
                 </select>
             </div>
             

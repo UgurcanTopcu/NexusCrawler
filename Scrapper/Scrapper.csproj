@@ -17,4 +17,8 @@
     <PackageReference Include="WinSCP" Version="6.5.5" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Utilities\" />
+  </ItemGroup>
+
 </Project>

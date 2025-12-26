@@ -137,6 +137,32 @@ public class TrendyolScraper : IDisposable
                 int newLinksOnPage = 0;
                 int lastReportedCount = productLinks.Count;
                 
+                // Get all widget-container elements (ad products) to exclude
+                var adContainers = _driver.FindElements(By.CssSelector(".widget-container"));
+                var adLinks = new HashSet<string>();
+                foreach (var container in adContainers)
+                {
+                    try
+                    {
+                        var containerLinks = container.FindElements(By.CssSelector("a[href*='-p-']"));
+                        foreach (var adLink in containerLinks)
+                        {
+                            var href = adLink.GetAttribute("href");
+                            if (!string.IsNullOrEmpty(href))
+                            {
+                                var cleanUrl = href.Split('?')[0];
+                                adLinks.Add(cleanUrl);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                
+                if (adLinks.Count > 0)
+                {
+                    Console.WriteLine($"[Trendyol] Excluding {adLinks.Count} ad products from widget-container");
+                }
+                
                 foreach (var element in linkElements)
                 {
                     // Stop if we already have enough products
@@ -152,6 +178,12 @@ public class TrendyolScraper : IDisposable
                         {
                             var fullUrl = href.StartsWith("http") ? href : BaseUrl + href;
                             var cleanUrl = fullUrl.Split('?')[0];
+                            
+                            // Skip if this is an ad product
+                            if (adLinks.Contains(cleanUrl))
+                            {
+                                continue;
+                            }
                             
                             if (!productLinks.Contains(cleanUrl))
                             {

@@ -449,7 +449,7 @@ public class TemplateService
                 new() { DisplayName = "Pamuklularý' kurutma programýnýn harcadýðý enerji", TechnicalName = "PROD_FEAT_90023", MappingHint = "" },
                 new() { DisplayName = "Ütü istemeyen parçalar' kurutma programýnýn kapasitesi", TechnicalName = "PROD_FEAT_90028", MappingHint = "" },
                 new() { DisplayName = "Kuru ütülenen pamuklular' kurutma programýnýn kapasitesi", TechnicalName = "PROD_FEAT_90027", MappingHint = "" },
-                new() { DisplayName = "Pamuklularý' kurutma programýnýn kapasitesi", TechnicalName = "PROD_FEAT_90026", MappingHint = "" },
+                new() { DisplayName = "Pamuklýlarý' kurutma programýnýn kapasitesi", TechnicalName = "PROD_FEAT_90026", MappingHint = "" },
                 new() { DisplayName = "Ütü istemeyen parçalarýn' kurutma süresi", TechnicalName = "PROD_FEAT_90034", MappingHint = "" },
                 new() { DisplayName = "Kuru ütülenen pamukluluarýn' kurutma süresi", TechnicalName = "PROD_FEAT_90033", MappingHint = "" },
                 new() { DisplayName = "Pamuklularýn' kurutma süresi", TechnicalName = "PROD_FEAT_90032", MappingHint = "" },
@@ -643,6 +643,132 @@ public class TemplateService
         };
         
         _templates["trendyol_dryer"] = dryerTemplate;
+        
+        // Trendyol Klima (Air Conditioner) Template (MediaMarkt)
+        var klimaTemplate = new ExportTemplate
+        {
+            Name = "trendyol_klima",
+            Description = "MediaMarkt Air Conditioner (Klima) Template for Trendyol Products",
+            Columns = new List<TemplateColumn>
+            {
+                new() { DisplayName = "Kategori", TechnicalName = "CATEGORY", MappingHint = "Category",
+                    Mapping = new() { Field = ProductField.Category } },
+                new() { DisplayName = "SHOP_SKU", TechnicalName = "SHOP_SKU", MappingHint = "" },
+                new() { DisplayName = "Baþlýk", TechnicalName = "TITLE__TR_TR", MappingHint = "Product Name",
+                    Mapping = new() { Field = ProductField.Name } },
+                new() { DisplayName = "EAN", TechnicalName = "EAN", MappingHint = "Barcode",
+                    Mapping = new() { Field = ProductField.Barcode } },
+                new() { DisplayName = "Marka", TechnicalName = "BRAND", MappingHint = "Brand",
+                    Mapping = new() { Field = ProductField.Brand } },
+                new() { DisplayName = "Manufacturer Part Number (MPN)", TechnicalName = "ATTR_PROD_MP_Manufacturer_PartNumber", MappingHint = "" },
+                new() { DisplayName = "Ürün Açýklamasý", TechnicalName = "Product_Description__TR_TR", MappingHint = "Description",
+                    Mapping = new() { Field = ProductField.Description } },
+                new() { DisplayName = "Age Restriction (in years) (TR)", TechnicalName = "ATTR_PROD_MP_SalesRestrictions__TR_TR", MappingHint = "" },
+                new() { DisplayName = "Ana Ürün Görseli", TechnicalName = "ATTR_PROD_MP_MainProductImage", MappingHint = "Image URL",
+                    Mapping = new() { Field = ProductField.CdnImageUrl } },
+                new() { DisplayName = "Ek Ürün Görseli_1", TechnicalName = "ATTR_PROD_MP_AdditionalImage1", MappingHint = "Additional Images",
+                    Mapping = new() { Field = ProductField.CdnAdditionalImage1 } },
+                new() { DisplayName = "Ek Ürün Görseli_2", TechnicalName = "ATTR_PROD_MP_AdditionalImage2", MappingHint = "",
+                    Mapping = new() { Field = ProductField.CdnAdditionalImage2 } },
+                new() { DisplayName = "Ürün Detay Görünüm_1", TechnicalName = "ATTR_PROD_MP_DetailView1", MappingHint = "" },
+                new() { DisplayName = "Ürün Detay Görünüm_2", TechnicalName = "ATTR_PROD_MP_DetailView2", MappingHint = "" },
+                new() { DisplayName = "Ürün Detay Görünüm_3", TechnicalName = "ATTR_PROD_MP_DetailView3", MappingHint = "" },
+                new() { DisplayName = "Lifestyle Görsel_1", TechnicalName = "ATTR_PROD_MP_LifeStyleImage1", MappingHint = "" },
+                new() { DisplayName = "Lifestyle Görsel_2", TechnicalName = "ATTR_PROD_MP_LifeStyleImage2", MappingHint = "" },
+                new() { DisplayName = "Lifestyle Görsel_3", TechnicalName = "ATTR_PROD_MP_LifeStyleImage3", MappingHint = "" },
+                
+                // Klima specific attributes
+                new() { DisplayName = "Ýnverter", TechnicalName = "PROD_FEAT_11284", MappingHint = "Ýnverter",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Ýnverter" } },
+                new() { DisplayName = "Soðutma Kapasitesi(BTU/s)", TechnicalName = "PROD_FEAT_11399", MappingHint = "Soðutma Kapasitesi",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Soðutma Kapasitesi" } },
+                new() { DisplayName = "Isýtma için enerji verimliliði sýnýfý", TechnicalName = "PROD_FEAT_91043", MappingHint = "Enerji Sýnýfý - Isýtma",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Enerji Sýnýfý - Isýtma" } },
+                new() { DisplayName = "Soðutma için enerji verimliliði sýnýfý", TechnicalName = "PROD_FEAT_91042", MappingHint = "Enerji Sýnýfý - Soðutma",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Enerji Sýnýfý - Soðutma" } },
+                new() { DisplayName = "Enerji Sýnýfý", TechnicalName = "PROD_FEAT_10770", MappingHint = "Enerji Sýnýfý",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Enerji Sýnýfý" } },
+                new() { DisplayName = "WiFi", TechnicalName = "PROD_FEAT_10576", MappingHint = "Wi-Fi",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Wi-Fi" } },
+                new() { DisplayName = "Ses Seviyesi", TechnicalName = "PROD_FEAT_10994", MappingHint = "Ses Seviyesi",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Ses Seviyesi" } },
+                new() { DisplayName = "Renk (temel)", TechnicalName = "PROD_FEAT_00003", MappingHint = "Renk",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Renk" } },
+                new() { DisplayName = "Yükseklik", TechnicalName = "PROD_FEAT_16111", MappingHint = "Yükseklik",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Yükseklik" } },
+                new() { DisplayName = "Geniþlik", TechnicalName = "PROD_FEAT_16110", MappingHint = "Geniþlik",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Geniþlik" } },
+                new() { DisplayName = "Derinlik", TechnicalName = "PROD_FEAT_16112", MappingHint = "Derinlik",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Derinlik" } },
+                new() { DisplayName = "Aðýrlýk", TechnicalName = "PROD_FEAT_16333", MappingHint = "Aðýrlýk",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Aðýrlýk" } },
+                new() { DisplayName = "Üretim Yeri (tr_TR)", TechnicalName = "PROD_FEAT_18008__TR_TR", MappingHint = "Menþei",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Menþei" } },
+            }
+        };
+        
+        _templates["trendyol_klima"] = klimaTemplate;
+        
+        // Trendyol Þofben (Water Heater) Template (MediaMarkt)
+        var waterHeaterTemplate = new ExportTemplate
+        {
+            Name = "trendyol_water_heater",
+            Description = "MediaMarkt Water Heater (Þofben) Template for Trendyol Products",
+            Columns = new List<TemplateColumn>
+            {
+                new() { DisplayName = "Kategori", TechnicalName = "CATEGORY", MappingHint = "Category",
+                    Mapping = new() { Field = ProductField.Category } },
+                new() { DisplayName = "SHOP_SKU", TechnicalName = "SHOP_SKU", MappingHint = "" },
+                new() { DisplayName = "Baþlýk", TechnicalName = "TITLE__TR_TR", MappingHint = "Product Name",
+                    Mapping = new() { Field = ProductField.Name } },
+                new() { DisplayName = "EAN", TechnicalName = "EAN", MappingHint = "Barcode",
+                    Mapping = new() { Field = ProductField.Barcode } },
+                new() { DisplayName = "Marka", TechnicalName = "BRAND", MappingHint = "Brand",
+                    Mapping = new() { Field = ProductField.Brand } },
+                new() { DisplayName = "Manufacturer Part Number (MPN)", TechnicalName = "ATTR_PROD_MP_Manufacturer_PartNumber", MappingHint = "" },
+                new() { DisplayName = "Ürün Açýklamasý", TechnicalName = "Product_Description__TR_TR", MappingHint = "Description",
+                    Mapping = new() { Field = ProductField.Description } },
+                new() { DisplayName = "Age Restriction (in years) (TR)", TechnicalName = "ATTR_PROD_MP_SalesRestrictions__TR_TR", MappingHint = "" },
+                new() { DisplayName = "Ana Ürün Görseli", TechnicalName = "ATTR_PROD_MP_MainProductImage", MappingHint = "Image URL",
+                    Mapping = new() { Field = ProductField.CdnImageUrl } },
+                new() { DisplayName = "Ek Ürün Görseli_1", TechnicalName = "ATTR_PROD_MP_AdditionalImage1", MappingHint = "Additional Images",
+                    Mapping = new() { Field = ProductField.CdnAdditionalImage1 } },
+                new() { DisplayName = "Ek Ürün Görseli_2", TechnicalName = "ATTR_PROD_MP_AdditionalImage2", MappingHint = "",
+                    Mapping = new() { Field = ProductField.CdnAdditionalImage2 } },
+                new() { DisplayName = "Ürün Detay Görünüm_1", TechnicalName = "ATTR_PROD_MP_DetailView1", MappingHint = "" },
+                new() { DisplayName = "Ürün Detay Görünüm_2", TechnicalName = "ATTR_PROD_MP_DetailView2", MappingHint = "" },
+                new() { DisplayName = "Ürün Detay Görünüm_3", TechnicalName = "ATTR_PROD_MP_DetailView3", MappingHint = "" },
+                new() { DisplayName = "Lifestyle Görsel_1", TechnicalName = "ATTR_PROD_MP_LifeStyleImage1", MappingHint = "" },
+                new() { DisplayName = "Lifestyle Görsel_2", TechnicalName = "ATTR_PROD_MP_LifeStyleImage2", MappingHint = "" },
+                new() { DisplayName = "Lifestyle Görsel_3", TechnicalName = "ATTR_PROD_MP_LifeStyleImage3", MappingHint = "" },
+                
+                // Þofben specific attributes
+                new() { DisplayName = "Kapasite", TechnicalName = "PROD_FEAT_10817", MappingHint = "Kapasite",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Kapasite" } },
+                new() { DisplayName = "Güç", TechnicalName = "PROD_FEAT_16246", MappingHint = "Güç",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Güç" } },
+                new() { DisplayName = "Enerji Sýnýfý", TechnicalName = "PROD_FEAT_10770", MappingHint = "Enerji Sýnýfý",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Enerji Sýnýfý" } },
+                new() { DisplayName = "Voltaj", TechnicalName = "PROD_FEAT_10449", MappingHint = "Voltaj",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Voltaj" } },
+                new() { DisplayName = "Frekans", TechnicalName = "PROD_FEAT_14435", MappingHint = "Frekans",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Frekans" } },
+                new() { DisplayName = "Renk (temel)", TechnicalName = "PROD_FEAT_00003", MappingHint = "Renk",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Renk" } },
+                new() { DisplayName = "Yükseklik", TechnicalName = "PROD_FEAT_16111", MappingHint = "Yükseklik",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Yükseklik" } },
+                new() { DisplayName = "Geniþlik", TechnicalName = "PROD_FEAT_16110", MappingHint = "Geniþlik",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Geniþlik" } },
+                new() { DisplayName = "Derinlik", TechnicalName = "PROD_FEAT_16112", MappingHint = "Derinlik",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Derinlik" } },
+                new() { DisplayName = "Aðýrlýk", TechnicalName = "PROD_FEAT_16333", MappingHint = "Aðýrlýk",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Aðýrlýk" } },
+                new() { DisplayName = "Üretim Yeri (tr_TR)", TechnicalName = "PROD_FEAT_18008__TR_TR", MappingHint = "Menþei",
+                    Mapping = new() { Field = ProductField.DynamicAttribute, AttributeKey = "Menþei" } },
+            }
+        };
+        
+        _templates["trendyol_water_heater"] = waterHeaterTemplate;
     }
 
     public ExportTemplate? GetTemplate(string templateName)
