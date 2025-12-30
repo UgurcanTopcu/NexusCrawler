@@ -77,9 +77,9 @@ public class HepsiburadaScraper : IDisposable
             }
             
             int page = 1;
-            // Hepsiburada shows ~36 products per page, calculate max pages accordingly
+            // Hepsiburada shows ~36 products per page, support up to 2000 products
             int productsPerPage = 36;
-            int maxPages = Math.Max(50, (maxProducts / productsPerPage) + 10);
+            int maxPages = Math.Max(100, (maxProducts / productsPerPage) + 15);
             int previousCount = 0;
             int consecutiveEmptyPages = 0;
             int consecutiveNoNewProducts = 0;
