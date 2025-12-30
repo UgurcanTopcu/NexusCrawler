@@ -74,8 +74,8 @@ public class TrendyolScraper : IDisposable
             }
             
             int page = 1;
-            // Calculate max pages needed: ~24 products per page, add buffer for 500 products
-            int maxPages = Math.Max(30, (maxProducts / 20) + 5);
+            // Calculate max pages needed: ~24 products per page, support up to 2000 products
+            int maxPages = Math.Max(100, (maxProducts / 24) + 10);
             int previousCount = 0;
             int emptyPageCount = 0;
             
@@ -567,27 +567,102 @@ public class TrendyolScraper : IDisposable
             }
             catch { }
 
-            // EXTRACT BARCODE
+            // EXTRACT BARCODE - Enhanced with multiple methods
             try
             {
+                // Method 1: Look in script tags for barcode/barkod in JSON
                 var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'barcode')]");
                 if (scriptNodes != null)
                 {
                     foreach (var scriptNode in scriptNodes)
                     {
-                        var jsonMatch = Regex.Match(scriptNode.InnerText, @"""(?:barcode|barkod)"":\s*""(\d{8,})""", RegexOptions.IgnoreCase);
-                        if (jsonMatch.Success)
+                        // Try multiple patterns for barcode
+                        var patterns = new[]
                         {
-                            product.Barcode = jsonMatch.Groups[1].Value;
+                            @"""(?:barcode|barkod)"":\s*""(\d{8,})""",           // Standard JSON: "barcode":"1234567890"
+                            @"""(?:barcode|barkod)"":\s*(\d{8,})",               // JSON without quotes: "barcode":1234567890
+                            @"(?:barcode|barkod)['""]?\s*[:=]\s*['""]?(\d{8,})", // General pattern
+                        };
+                        
+                        foreach (var pattern in patterns)
+                        {
+                            var jsonMatch = Regex.Match(scriptNode.InnerText, pattern, RegexOptions.IgnoreCase);
+                            if (jsonMatch.Success)
+                            {
+                                product.Barcode = jsonMatch.Groups[1].Value;
+                                Console.WriteLine($"[Trendyol] Barcode found: {product.Barcode}");
+                                break;
+                            }
+                        }
+                        
+                        if (!string.IsNullOrEmpty(product.Barcode))
                             break;
+                    }
+                }
+                
+                // Method 2: Look for barcode in meta tags (sometimes present in scrape.do HTML)
+                if (string.IsNullOrEmpty(product.Barcode))
+                {
+                    var metaNodes = htmlDoc.DocumentNode.SelectNodes("//meta[contains(@property, 'barcode') or contains(@name, 'barcode')]");
+                    if (metaNodes != null)
+                    {
+                        foreach (var meta in metaNodes)
+                        {
+                            var content = meta.GetAttributeValue("content", "");
+                            if (!string.IsNullOrEmpty(content) && Regex.IsMatch(content, @"^\d{8,}$"))
+                            {
+                                product.Barcode = content;
+                                Console.WriteLine($"[Trendyol] Barcode found in meta: {product.Barcode}");
+                                break;
+                            }
                         }
                     }
                 }
+                
+                // Method 3: Look in product attributes section (some pages have it there)
+                if (string.IsNullOrEmpty(product.Barcode) && product.Attributes.Count > 0)
+                {
+                    foreach (var attr in product.Attributes)
+                    {
+                        if (attr.Key.Contains("Barkod", StringComparison.OrdinalIgnoreCase) || 
+                            attr.Key.Contains("Barcode", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var barcodeValue = Regex.Match(attr.Value, @"\d{8,}");
+                            if (barcodeValue.Success)
+                            {
+                                product.Barcode = barcodeValue.Value;
+                                Console.WriteLine($"[Trendyol] Barcode found in attributes: {product.Barcode}");
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // Method 4: Search entire HTML for barcode patterns (last resort for scrape.do)
+                if (string.IsNullOrEmpty(product.Barcode) && Method == ScrapeMethod.ScrapeDo)
+                {
+                    var barcodePattern = @"(?:barcode|barkod)['""\s:=]+(\d{8,15})";
+                    var htmlMatch = Regex.Match(html, barcodePattern, RegexOptions.IgnoreCase);
+                    if (htmlMatch.Success)
+                    {
+                        product.Barcode = htmlMatch.Groups[1].Value;
+                        Console.WriteLine($"[Trendyol] Barcode found in HTML (scrape.do): {product.Barcode}");
+                    }
+                }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Trendyol] Barcode extraction error: {ex.Message}");
+            }
 
             // EXTRACT PRODUCT ATTRIBUTES
             await ExtractProductAttributes(htmlDoc, product);
+
+            // Log successful extraction summary
+            if (Method == ScrapeMethod.ScrapeDo)
+            {
+                Console.WriteLine($"[Trendyol-ScrapeDo] Product: {product.Name ?? "N/A"} | Barcode: {product.Barcode ?? "NOT FOUND"} | Price: {product.DiscountedPrice ?? "N/A"}");
+            }
 
             return product;
         }

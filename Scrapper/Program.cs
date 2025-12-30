@@ -1,5 +1,6 @@
 ﻿using Scrapper.Services;
 using OfficeOpenXml;
+using Microsoft.AspNetCore.StaticFiles;
 
 // Configure EPPlus license FIRST - before any ExcelPackage usage
 // EPPlus 8.x: Use License.SetLicenseContext or specific license methods
@@ -36,10 +37,29 @@ builder.Services.AddSingleton<TrendyolScraperService>();
 builder.Services.AddSingleton<HepsiburadaScraperService>();
 builder.Services.AddSingleton<AkakceScraperService>(); // NEW: Akakce service
 
+// Add services to the container.
+builder.Services.AddControllersWithViews();
+
+// Configure static files with UTF-8 encoding
+builder.Services.AddDirectoryBrowser();
+
 var app = builder.Build();
 
-// Serve static files
-app.UseStaticFiles();
+// Configure the HTTP request pipeline.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Home/Error");
+    app.UseHsts();
+}
+
+
+app.UseRouting();
+
+app.UseAuthorization();
+
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=Home}/{action=Index}/{id?}");
 
 // Default route - serve index.html with navigation
 app.MapGet("/", () => Results.Content("""
@@ -215,17 +235,17 @@ app.MapGet("/", () => Results.Content("""
 </head>
 <body>
     <div class="container">
-        <h1>🛍️ Scrapper</h1>
+        <h1>🔧 Scrapper</h1>
         <p class="subtitle">Extract product data from e-commerce sites</p>
         
         <!-- Navigation Buttons -->
         <div class="nav-buttons">
             <div class="nav-btn active" onclick="window.location.href='/'">
-                <h3>🏪 Category Scraper</h3>
+                <h3>🛒 Category Scraper</h3>
                 <p>Trendyol & Hepsiburada</p>
             </div>
             <div class="nav-btn" onclick="window.location.href='/akakce'">
-                <h3>📊 Akakce Scraper</h3>
+                <h3>💰 Akakce Scraper</h3>
                 <p>Price Comparison</p>
             </div>
         </div>
@@ -248,8 +268,8 @@ app.MapGet("/", () => Results.Content("""
             
             <div class="form-group">
                 <label for="maxProducts">Maximum Products</label>
-                <input type="number" id="maxProducts" name="maxProducts" min="1" max="500" value="20" required>
-                <div class="input-hint">Choose between 1 and 500 products</div>
+                <input type="number" id="maxProducts" name="maxProducts" min="1" max="2000" value="20" required>
+                <div class="input-hint">Choose between 1 and 2000 products</div>
             </div>
             
             <div class="form-group">
@@ -264,12 +284,13 @@ app.MapGet("/", () => Results.Content("""
                 <label for="template">Export Template</label>
                 <select id="template" name="template">
                     <option value="">Default (No Template)</option>
-                    <option value="trendyol_kettle">📋 Trendyol Kettle (MediaMarkt)</option>
+                    <option value="trendyol_kettle">☕ Trendyol Kettle (MediaMarkt)</option>
                     <option value="trendyol_laptop">💻 Trendyol Laptop (MediaMarkt)</option>
                     <option value="trendyol_robot_vacuum">🤖 Trendyol Robot Vacuum (MediaMarkt)</option>
-                    <option value="trendyol_dryer">🌀 Trendyol Dryer (MediaMarkt)</option>
-                    <option value="trendyol_klima">🌡️ Trendyol Klima (MediaMarkt)</option>
-                    <option value="trendyol_water_heater">🚿 Trendyol Şofben (MediaMarkt)</option>
+                    <option value="trendyol_dryer">👔 Trendyol Dryer (MediaMarkt)</option>
+                    <option value="trendyol_klima">❄️ Trendyol Klima (MediaMarkt)</option>
+                    <option value="trendyol_water_heater">🔥 Trendyol Şofben (MediaMarkt)</option>
+                    <option value="trendyol_cordless_vacuum_cleaner">🧹 Trendyol Cordless Vacuum Cleaner (MediaMarkt)</option>
                 </select>
             </div>
             
@@ -291,7 +312,7 @@ app.MapGet("/", () => Results.Content("""
             </div>
             
             <div class="button-group">
-                <button type="submit" id="startBtn">🚀 Start Scraping</button>
+                <button type="submit" id="startBtn">▶️ Start Scraping</button>
                 <button type="button" id="stopBtn" onclick="stopScraping()">⏹️ Stop</button>
                 <button type="button" id="resetBtn" onclick="resetForm()">🔄 Reset</button>
             </div>
@@ -334,7 +355,7 @@ app.MapGet("/", () => Results.Content("""
             document.getElementById('progressFill').textContent = '0%';
             document.getElementById('status').innerHTML = '';
             document.getElementById('startBtn').disabled = false;
-            document.getElementById('startBtn').textContent = '🚀 Start Scraping';
+            document.getElementById('startBtn').textContent = '▶️ Start Scraping';
             document.getElementById('stopBtn').style.display = 'none';
             updateExample();
         }
@@ -350,7 +371,7 @@ app.MapGet("/", () => Results.Content("""
             }
             isRunning = false;
             document.getElementById('startBtn').disabled = false;
-            document.getElementById('startBtn').textContent = '🚀 Start Scraping';
+            document.getElementById('startBtn').textContent = '▶️ Start Scraping';
             document.getElementById('stopBtn').style.display = 'none';
             
             const statusItem = document.createElement('div');
@@ -438,7 +459,7 @@ app.MapGet("/", () => Results.Content("""
                                 if (data.complete) {
                                     isRunning = false;
                                     document.getElementById('startBtn').disabled = false;
-                                    document.getElementById('startBtn').textContent = '🚀 Start Scraping';
+                                    document.getElementById('startBtn').textContent = '▶️ Start Scraping';
                                     document.getElementById('stopBtn').style.display = 'none';
                                 }
                             } catch (parseErr) { }
@@ -451,7 +472,7 @@ app.MapGet("/", () => Results.Content("""
                 }
                 isRunning = false;
                 document.getElementById('startBtn').disabled = false;
-                document.getElementById('startBtn').textContent = '🚀 Start Scraping';
+                document.getElementById('startBtn').textContent = '▶️ Start Scraping';
                 document.getElementById('stopBtn').style.display = 'none';
             }
         });
@@ -671,16 +692,16 @@ app.MapGet("/akakce", () => Results.Content("""
 </head>
 <body>
     <div class="container">
-        <h1>📊 Akakce Scraper</h1>
+        <h1>🤑 Akakce Scraper</h1>
         <p class="subtitle">Compare prices across multiple sellers from Akakce</p>
         
         <div class="nav-buttons">
             <div class="nav-btn" onclick="window.location.href='/'">
-                <h3>🏪 Category Scraper</h3>
+                <h3>🛒 Category Scraper</h3>
                 <p>Trendyol & Hepsiburada</p>
             </div>
             <div class="nav-btn active">
-                <h3>📊 Akakce Scraper</h3>
+                <h3>💰 Akakce Scraper</h3>
                 <p>Price Comparison</p>
             </div>
         </div>
@@ -689,7 +710,7 @@ app.MapGet("/akakce", () => Results.Content("""
             <!-- Input Mode Toggle -->
             <div class="mode-toggle">
                 <div class="mode-btn active" onclick="setMode('url')" id="modeUrl">🔗 Category URL</div>
-                <div class="mode-btn" onclick="setMode('file')" id="modeFile">📁 Excel File</div>
+                <div class="mode-btn" onclick="setMode('file')" id="modeFile">📂 Excel File</div>
             </div>
             
             <!-- URL Input Section -->
@@ -704,8 +725,14 @@ app.MapGet("/akakce", () => Results.Content("""
                 
                 <div class="form-group">
                     <label for="maxProducts">Maximum Products</label>
-                    <input type="number" id="maxProducts" min="1" max="500" value="20">
-                    <div class="input-hint">Limit: 1-500 products (will paginate through category pages)</div>
+                    <input type="number" id="maxProducts" min="1" max="2000" value="20">
+                    <div class="input-hint">Limit: 1-2000 products (will paginate through category pages)</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="startFrom">Start From</label>
+                    <input type="number" id="startFrom" min="1" value="1">
+                    <div class="input-hint">Start scraping from this product number</div>
                 </div>
                 
                 <div class="example">
@@ -740,7 +767,7 @@ app.MapGet("/akakce", () => Results.Content("""
             </div>
             
             <div class="button-group">
-                <button type="submit" id="akakceStartBtn">🚀 Start Scraping</button>
+                <button type="submit" id="akakceStartBtn">▶️ Start Scraping</button>
                 <button type="button" id="akakceStopBtn" onclick="stopScraping()">⏹️ Stop</button>
                 <button type="button" id="akakceResetBtn" onclick="resetForm()">🔄 Reset</button>
             </div>
@@ -812,8 +839,9 @@ app.MapGet("/akakce", () => Results.Content("""
             fileName.textContent = '';
             document.getElementById('categoryUrl').value = 'https://www.akakce.com/laptop-notebook.html';
             document.getElementById('maxProducts').value = '10';
+            document.getElementById('startFrom').value = '1';
             document.getElementById('akakceStartBtn').disabled = false;
-            document.getElementById('akakceStartBtn').textContent = '🚀 Start Scraping';
+            document.getElementById('akakceStartBtn').textContent = '▶️ Start Scraping';
             document.getElementById('akakceStopBtn').style.display = 'none';
             document.getElementById('progress').style.display = 'none';
             document.getElementById('progressFill').style.width = '0%';
@@ -829,7 +857,7 @@ app.MapGet("/akakce", () => Results.Content("""
             if (abortController) abortController.abort();
             isRunning = false;
             document.getElementById('akakceStartBtn').disabled = false;
-            document.getElementById('akakceStartBtn').textContent = '🚀 Start Scraping';
+            document.getElementById('akakceStartBtn').textContent = '▶️ Start Scraping';
             document.getElementById('akakceStopBtn').style.display = 'none';
             
             const statusItem = document.createElement('div');
@@ -858,6 +886,7 @@ app.MapGet("/akakce", () => Results.Content("""
                     // Category URL mode
                     const categoryUrl = document.getElementById('categoryUrl').value;
                     const maxProducts = document.getElementById('maxProducts').value;
+                    const startFrom = document.getElementById('startFrom').value;
                     
                     response = await fetch('/api/akakce/scrape-category', {
                         method: 'POST',
@@ -865,7 +894,8 @@ app.MapGet("/akakce", () => Results.Content("""
                         body: JSON.stringify({
                             categoryUrl: categoryUrl,
                             maxProducts: parseInt(maxProducts),
-                            sessionId: sessionId
+                            sessionId: sessionId,
+                            startFrom: parseInt(startFrom)
                         }),
                         signal: abortController.signal
                     });
@@ -928,7 +958,7 @@ app.MapGet("/akakce", () => Results.Content("""
                                 if (data.complete) {
                                     isRunning = false;
                                     document.getElementById('akakceStartBtn').disabled = false;
-                                    document.getElementById('akakceStartBtn').textContent = '🚀 Start Scraping';
+                                    document.getElementById('akakceStartBtn').textContent = '▶️ Start Scraping';
                                     document.getElementById('akakceStopBtn').style.display = 'none';
                                 }
                             } catch (parseErr) {}
@@ -941,7 +971,7 @@ app.MapGet("/akakce", () => Results.Content("""
                 }
                 isRunning = false;
                 document.getElementById('akakceStartBtn').disabled = false;
-                document.getElementById('akakceStartBtn').textContent = '🚀 Start Scraping';
+                document.getElementById('akakceStartBtn').textContent = '▶️ Start Scraping';
                 document.getElementById('akakceStopBtn').style.display = 'none';
             }
         });
@@ -989,7 +1019,8 @@ app.MapPost("/api/akakce/scrape-category", async (AkakceCategoryRequest request,
                     await writer.WriteLineAsync($"data: {data}\n");
                     await writer.FlushAsync();
                 },
-                request.SessionId
+                request.SessionId,
+                request.StartFrom
             );
         }
         catch (Exception ex)
@@ -1160,8 +1191,8 @@ app.MapGet("/api/download/{fileName}", (string fileName) =>
     return Results.File(filePath, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
 });
 
-Console.WriteLine("🚀 Scrapper Web Application");
-Console.WriteLine("📍 Open your browser and navigate to: http://localhost:5000");
+Console.WriteLine("🔧 Scrapper Web Application");
+Console.WriteLine("🌐 Open your browser and navigate to: http://localhost:5000");
 Console.WriteLine("   - Category Scraper: http://localhost:5000/");
 Console.WriteLine("   - Akakce Scraper: http://localhost:5000/akakce");
 Console.WriteLine("Press Ctrl+C to stop the server");
@@ -1182,5 +1213,7 @@ public record ScraperRequest(
 public record AkakceCategoryRequest(
     string CategoryUrl,
     int MaxProducts,
-    string? SessionId
+    string? SessionId,
+    int StartFrom = 1
 );
+

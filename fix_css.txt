@@ -1,0 +1,5 @@
+Line 139: background: linear-gradient(135deg, #667eea 0%, #764ba2 100%;
+Should be: background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+Line 742: background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%;
+Should be: background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);

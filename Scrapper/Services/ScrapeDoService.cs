@@ -38,7 +38,8 @@ public class ScrapeDoService
         var originalQuery = uri.Query;
         
         string pageParam = isHepsiburada ? "sayfa" : "pi";
-        int maxPages = Math.Max(30, (maxProducts / 20) + 5);
+        // Support large scrapes up to 2000 products
+        int maxPages = Math.Max(150, (maxProducts / 24) + 15);
         int page = 1;
         int emptyPageCount = 0;
         

@@ -1,9 +1,9 @@
-using HtmlAgilityPack;
+ï»¿using HtmlAgilityPack;
 using Scrapper.Models;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using OpenQA.Selenium;
-using OpenQA.Selenium.Chrome;
+using OpenQA.Selenium.Edge;
 using OpenQA.Selenium.Support.UI;
 using OpenQA.Selenium.Interactions;
 
@@ -11,14 +11,14 @@ namespace Scrapper.Services;
 
 /// <summary>
 /// Scraper for Akakce product pages - extracts product info and all seller listings
-/// Uses Chrome with persistent profile and advanced anti-detection to bypass Cloudflare
+/// Uses Edge with persistent profile and advanced anti-detection to bypass Cloudflare
 /// </summary>
 public class AkakceScraper : IDisposable
 {
     private readonly HttpClient _httpClient;
     private IWebDriver? _driver;
     private const string BaseUrl = "https://www.akakce.com";
-    private static readonly string UserDataDir = Path.Combine(Path.GetTempPath(), "AkakceChromeProfile");
+    private static readonly string UserDataDir = Path.Combine(Path.GetTempPath(), "AkakceEdgeProfile");
     private static readonly Random _random = new Random();
     private int _productsScrapedSinceLastChallenge = 0;
     
@@ -26,14 +26,13 @@ public class AkakceScraper : IDisposable
     private const int MIN_DELAY_BETWEEN_PRODUCTS = 5;
     private const int MAX_DELAY_BETWEEN_PRODUCTS = 10;
     
-    // User agent rotation list - realistic Chrome versions
+    // User agent rotation list - realistic Edge versions
     private static readonly string[] UserAgents = new[]
     {
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0",
+        "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
     };
     
     public ScrapeMethod Method { get; set; } = ScrapeMethod.Selenium;
@@ -55,7 +54,7 @@ public class AkakceScraper : IDisposable
     {
         if (_driver == null)
         {
-            Console.WriteLine("[Akakce] Initializing Chrome with enhanced anti-detection...");
+            Console.WriteLine("[Akakce] Initializing Edge with enhanced anti-detection...");
             Console.WriteLine($"[Akakce] Profile directory: {UserDataDir}");
             
             // Create profile directory if it doesn't exist
@@ -64,15 +63,15 @@ public class AkakceScraper : IDisposable
                 Directory.CreateDirectory(UserDataDir);
             }
             
-            var options = new ChromeOptions();
-            
+            var options = new EdgeOptions();
+
             // Use persistent profile - this helps bypass Cloudflare after first manual verification
             options.AddArgument($"--user-data-dir={UserDataDir}");
             options.AddArgument("--profile-directory=Default");
-            
+
             // CRITICAL: NOT headless - required for Cloudflare bypass
             // Headless mode is easily detected by Cloudflare
-            
+
             // Window and display settings
             options.AddArgument("--window-size=1920,1080");
             options.AddArgument("--start-maximized");
@@ -118,13 +117,13 @@ public class AkakceScraper : IDisposable
             options.AddArgument("--log-level=3");
             options.AddArgument("--silent");
             
-            var service = ChromeDriverService.CreateDefaultService();
+            var service = EdgeDriverService.CreateDefaultService();
             service.SuppressInitialDiagnosticInformation = true;
             service.HideCommandPromptWindow = true;
             
             try
             {
-                _driver = new ChromeDriver(service, options, TimeSpan.FromMinutes(3));
+                _driver = new EdgeDriver(service, options, TimeSpan.FromMinutes(3));
                 
                 // Set page load timeout
                 _driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(60);
@@ -133,12 +132,12 @@ public class AkakceScraper : IDisposable
                 // CRITICAL: Inject anti-detection scripts BEFORE any navigation
                 InjectAntiDetectionScripts();
                 
-                Console.WriteLine("[Akakce] ? Chrome driver initialized with anti-detection");
+                Console.WriteLine("[Akakce] âœ“ Edge driver initialized with anti-detection");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Akakce] ? Error initializing Chrome: {ex.Message}");
-                Console.WriteLine("[Akakce] TIP: Close any existing Chrome windows and try again");
+                Console.WriteLine($"[Akakce] âœ— Error initializing Edge: {ex.Message}");
+                Console.WriteLine("[Akakce] TIP: Close any existing Edge windows and try again");
                 throw;
             }
         }
@@ -153,7 +152,7 @@ public class AkakceScraper : IDisposable
         
         try
         {
-            var chromeDriver = (ChromeDriver)_driver;
+            var edgeDriver = (EdgeDriver)_driver;
             
             // Comprehensive anti-detection script
             var antiDetectionScript = @"
@@ -167,7 +166,7 @@ public class AkakceScraper : IDisposable
                 Object.defineProperty(navigator, 'plugins', {
                     get: () => {
                         const plugins = [
-                            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                            { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
                             { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
                             { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
                         ];
@@ -189,7 +188,7 @@ public class AkakceScraper : IDisposable
                     configurable: true
                 });
                 
-                // 5. Add chrome object (present in real Chrome)
+                // 5. Add chrome object (Edge is Chromium-based)
                 window.chrome = {
                     runtime: {},
                     loadTimes: function() { return {}; },
@@ -226,24 +225,24 @@ public class AkakceScraper : IDisposable
                 console.log('[Anti-Detection] Scripts injected successfully');
             ";
             
-            // Execute via CDP for earlier injection
-            chromeDriver.ExecuteCdpCommand(
+            // Execute via CDP for earlier injection (Edge supports CDP like Chrome)
+            edgeDriver.ExecuteCdpCommand(
                 "Page.addScriptToEvaluateOnNewDocument",
                 new Dictionary<string, object> { ["source"] = antiDetectionScript }
             );
             
-            Console.WriteLine("[Akakce] ? Anti-detection scripts injected via CDP");
+            Console.WriteLine("[Akakce] âœ“ Anti-detection scripts injected via CDP");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] ? CDP injection failed: {ex.Message}");
+            Console.WriteLine($"[Akakce] âš  CDP injection failed: {ex.Message}");
             
             // Fallback: Direct JavaScript injection
             try
             {
                 var jsExecutor = (IJavaScriptExecutor)_driver;
                 jsExecutor.ExecuteScript("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})");
-                Console.WriteLine("[Akakce] ? Fallback anti-detection applied");
+                Console.WriteLine("[Akakce] âœ“ Fallback anti-detection applied");
             }
             catch { }
         }
@@ -650,7 +649,7 @@ public class AkakceScraper : IDisposable
                 if (!title.Contains("Just a moment"))
                 {
                     if (title.Contains(" | ")) title = title.Split(" | ")[0].Trim();
-                    if (title.Contains(" Fiyatlarý")) title = title.Split(" Fiyatlarý")[0].Trim();
+                    if (title.Contains(" FiyatlarÄ±")) title = title.Split(" FiyatlarÄ±")[0].Trim();
                     product.Name = title;
                 }
             }
@@ -807,16 +806,16 @@ public class AkakceScraper : IDisposable
                         if (elText.startsWith('/') && elText.length > 1 && elText.length < 60) {
                             var candidate = elText.substring(1).trim();
                             candidate = candidate.split('\n')[0].trim();
-                            candidate = candidate.split('Satýcýya')[0].trim();
+                            candidate = candidate.split('SatÄ±cÄ±ya')[0].trim();
                             candidate = candidate.split('Stokta')[0].trim();
-                            candidate = candidate.split('Son güncelleme')[0].trim();
-                            candidate = candidate.split('Kaçýrýlmayacak')[0].trim();
-                            candidate = candidate.split('Bugün')[0].trim();
+                            candidate = candidate.split('Son gÃ¼ncelleme')[0].trim();
+                            candidate = candidate.split('KaÃ§Ä±rÄ±lmayacak')[0].trim();
+                            candidate = candidate.split('BugÃ¼n')[0].trim();
                             candidate = candidate.split('Kargo')[0].trim();
                             
                             if (candidate && candidate.length > 1 && candidate.length < 50 &&
                                 !candidate.match(/^[0-9]/) && !candidate.includes('TL') &&
-                                !candidate.includes(':') && !candidate.includes('gün')) {
+                                !candidate.includes(':') && !candidate.includes('gÃ¼n')) {
                                 sellerName = candidate;
                                 break;
                             }
@@ -832,18 +831,18 @@ public class AkakceScraper : IDisposable
                             if (slashIdx > 0 && slashIdx < anchorText.length - 1) {
                                 var afterSlash = anchorText.substring(slashIdx + 1).trim();
                                 afterSlash = afterSlash.split('\n')[0].trim();
-                                afterSlash = afterSlash.split('Satýcýya')[0].trim();
+                                afterSlash = afterSlash.split('SatÄ±cÄ±ya')[0].trim();
                                 afterSlash = afterSlash.split('Stokta')[0].trim();
-                                afterSlash = afterSlash.split('Son güncelleme')[0].trim();
-                                afterSlash = afterSlash.split('Kaçýrýlmayacak')[0].trim();
-                                afterSlash = afterSlash.split('Bugün')[0].trim();
+                                afterSlash = afterSlash.split('Son gÃ¼ncelleme')[0].trim();
+                                afterSlash = afterSlash.split('KaÃ§Ä±rÄ±lmayacak')[0].trim();
+                                afterSlash = afterSlash.split('BugÃ¼n')[0].trim();
                                 afterSlash = afterSlash.split('Kargo')[0].trim();
-                                afterSlash = afterSlash.split(' iþ günü')[0].trim();
+                                afterSlash = afterSlash.split(' iÅŸ gÃ¼nÃ¼')[0].trim();
                                 
                                 if (afterSlash && afterSlash.length > 1 && afterSlash.length < 50 &&
                                     !afterSlash.match(/^[0-9]/) && !afterSlash.includes('TL') &&
-                                    !afterSlash.includes(':') && !afterSlash.includes('gün') &&
-                                    !afterSlash.includes('Fýrsatlar') && !afterSlash.includes('dakika')) {
+                                    !afterSlash.includes(':') && !afterSlash.includes('gÃ¼n') &&
+                                    !afterSlash.includes('FÄ±rsatlar') && !afterSlash.includes('dakika')) {
                                     sellerName = afterSlash;
                                     break;
                                 }
@@ -927,12 +926,12 @@ public class AkakceScraper : IDisposable
                             
                             // Clean up: remove any trailing noise
                             candidate = candidate.split('\n')[0].trim();
-                            candidate = candidate.split('Satýcýya')[0].trim();
-                            candidate = candidate.split('Stokta')[0].trim();
-                            candidate = candidate.split('Son güncelleme')[0].trim();
-                            candidate = candidate.split('Kaçýrýlmayacak')[0].trim();
-                            candidate = candidate.split('Bugün')[0].trim();
+                            candidate = candidate.split('SatÄ±cÄ±ya')[0].trim();
+                            candidate = candidate.split('KaÃ§Ä±rÄ±lmayacak')[0].trim();
+                            candidate = candidate.split('FÄ±rsatlar')[0].trim();
+                            candidate = candidate.split('BugÃ¼n')[0].trim();
                             candidate = candidate.split('Kargo')[0].trim();
+                            candidate = candidate.split(' iÅŸ gÃ¼nÃ¼')[0].trim();
                             
                             // Validate: should be alphanumeric, not a price, not a date/time
                             if (candidate && 
@@ -941,7 +940,7 @@ public class AkakceScraper : IDisposable
                                 !candidate.match(/^[0-9]/) &&
                                 !candidate.includes('TL') &&
                                 !candidate.includes(':') &&
-                                !candidate.includes('gün') &&
+                                !candidate.includes('gÃ¼n') &&
                                 !candidate.includes('adet')) {
                                 sellerName = candidate;
                                 break;
@@ -963,13 +962,12 @@ public class AkakceScraper : IDisposable
                                 
                                 // Take first word/segment
                                 afterSlash = afterSlash.split('\n')[0].trim();
-                                afterSlash = afterSlash.split('Satýcýya')[0].trim();
-                                afterSlash = afterSlash.split('Stokta')[0].trim();
-                                afterSlash = afterSlash.split('Son güncelleme')[0].trim();
-                                afterSlash = afterSlash.split('Kaçýrýlmayacak')[0].trim();
-                                afterSlash = afterSlash.split('Bugün')[0].trim();
+                                afterSlash = afterSlash.split('SatÄ±cÄ±ya')[0].trim();
+                                afterSlash = afterSlash.split('KaÃ§Ä±rÄ±lmayacak')[0].trim();
+                                afterSlash = afterSlash.split('FÄ±rsatlar')[0].trim();
+                                afterSlash = afterSlash.split('BugÃ¼n')[0].trim();
                                 afterSlash = afterSlash.split('Kargo')[0].trim();
-                                afterSlash = afterSlash.split(' iþ günü')[0].trim();
+                                afterSlash = afterSlash.split(' iÅŸ gÃ¼nÃ¼')[0].trim();
                                 
                                 // Validate
                                 if (afterSlash && 
@@ -979,9 +977,9 @@ public class AkakceScraper : IDisposable
                                     !afterSlash.includes('TL') &&
                                     !afterSlash.includes(':') &&
                                     !afterSlash.includes('dakika') &&
-                                    !afterSlash.includes('gün') &&
+                                    !afterSlash.includes('gÃ¼n') &&
                                     !afterSlash.includes('adet') &&
-                                    !afterSlash.includes('Fýrsatlar')) {
+                                    !afterSlash.includes('FÄ±rsatlar')) {
                                     sellerName = afterSlash;
                                     break;
                                 }
@@ -1000,12 +998,11 @@ public class AkakceScraper : IDisposable
                             // Skip known non-seller patterns
                             if (!spanText || spanText.length < 2 || spanText.length > 50) continue;
                             if (spanText.includes('TL') || spanText.includes('kargo')) continue;
-                            if (spanText.includes('Satýcýya') || spanText.includes('Git')) continue;
-                            if (spanText.includes('Stokta') || spanText.includes('adet')) continue;
-                            if (spanText.includes('güncelleme') || spanText.includes('Bugün')) continue;
-                            if (spanText.includes('Kaçýrýlmayacak') || spanText.includes('Fýrsatlar')) continue;
+                            if (spanText.includes('SatÄ±cÄ±ya') || spanText.includes('Git')) continue;
+                            if (spanText.includes('KaÃ§Ä±rÄ±lmayacak') || spanText.includes('FÄ±rsatlar')) continue;
+                            if (spanText.includes('gÃ¼ncelleme') || spanText.includes('BugÃ¼n')) continue;
                             if (spanText.includes('En Ucuz') || spanText.includes('Dahil')) continue;
-                            if (spanText.includes('iþ günü') || spanText.includes('dakika')) continue;
+                            if (spanText.includes('iÅŸ gÃ¼nÃ¼') || spanText.includes('dakika')) continue;
                             if (spanClass.includes('price') || spanClass.includes('btn')) continue;
                             if (spanText.match(/^[0-9]{1,2}:[0-9]{2}/)) continue; // Time pattern
                             if (spanText.match(/^[0-9]{1,3}[\.\,][0-9]{3}/)) continue; // Price pattern
@@ -1018,7 +1015,7 @@ public class AkakceScraper : IDisposable
                             
                             // Check if different from marketplace and looks like a name
                             if (spanText.toLowerCase() !== marketplace &&
-                                spanText.match(/^[A-Za-z0-9ýðüþöçÝÐÜÞÖÇ]/)) {
+                                spanText.match(/^[A-Za-z0-9Ä±ÄŸÃ¼ÅŸÃ¶Ã§Ä°ÄžÃœÅžÃ–Ã‡]/)) {
                                 // Could be seller name, but be cautious
                                 // Only use if no better option
                             }
@@ -1039,11 +1036,18 @@ public class AkakceScraper : IDisposable
                 {
                     Console.WriteLine($"[Akakce] Found {names.Count} potential names in DOM for enrichment");
                     
+                    // SAFETY CHECK: Only proceed if we have matching counts
+                    if (names.Count != product.Sellers.Count)
+                    {
+                        Console.WriteLine($"[Akakce] WARNING: Seller count mismatch (Sellers: {product.Sellers.Count}, DOM names: {names.Count}) - skipping enrichment to avoid data corruption");
+                        return;
+                    }
+                    
                     int enrichedCount = 0;
                     int skippedCount = 0;
                     foreach (var seller in product.Sellers)
                     {
-                        // Only enrich if SellerName is empty
+                        // Only enrich if SellerName is empty AND we have a valid index
                         if (string.IsNullOrEmpty(seller.SellerName) && seller.Rank <= names.Count)
                         {
                             var domName = names[seller.Rank - 1];
@@ -1051,14 +1055,14 @@ public class AkakceScraper : IDisposable
                             // Validate the name - must not be noise
                             bool isValid = !string.IsNullOrWhiteSpace(domName) &&
                                 !domName.Equals(seller.Marketplace, StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("Satýcýya", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("Kaçýrýlmayacak", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("Fýrsatlar", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("güncelleme", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("SatÄ±cÄ±ya", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("KaÃ§Ä±rÄ±lmayacak", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("FÄ±rsatlar", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("gÃ¼ncelleme", StringComparison.OrdinalIgnoreCase) &&
                                 !domName.Contains("En Ucuz", StringComparison.OrdinalIgnoreCase) &&
                                 !domName.Contains("Kargo", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("Bugün", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("iþ günü", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("BugÃ¼n", StringComparison.OrdinalIgnoreCase) &&
+                                !domName.Contains("iÅŸ gÃ¼nÃ¼", StringComparison.OrdinalIgnoreCase) &&
                                 !domName.Contains("dakika", StringComparison.OrdinalIgnoreCase) &&
                                 !domName.Contains("adet", StringComparison.OrdinalIgnoreCase) &&
                                 !domName.Contains(":", StringComparison.OrdinalIgnoreCase) &&
@@ -1077,6 +1081,7 @@ public class AkakceScraper : IDisposable
                             }
                             else
                             {
+                                // DON'T ASSIGN ANYTHING - leave SellerName empty if invalid
                                 skippedCount++;
                             }
                         }
@@ -1448,19 +1453,49 @@ public class AkakceScraper : IDisposable
                 var urlsJson = jsExecutor.ExecuteScript(@"
                     var urls = [];
                     var seen = {};
-                    document.querySelectorAll('li[data-pr]').forEach(function(li) {
-                        var links = li.querySelectorAll('a[href]');
-                        links.forEach(function(a) {
+                    
+                    // Target ONLY the main product list container - ul#CPL or ul.pl_v9
+                    // This excludes sticky ads, promoted items outside the main list
+                    var productList = document.querySelector('ul#CPL') || 
+                                     document.querySelector('ul.pl_v9.qv_v9') ||
+                                     document.querySelector('ul.pl_v9');
+                    
+                    if (productList) {
+                        // Get direct child li elements only (not nested ones)
+                        var productItems = productList.querySelectorAll(':scope > li[data-pr]');
+                        
+                        productItems.forEach(function(li) {
+                            // Get the main product link
+                            var links = li.querySelectorAll('a[href]');
+                            var foundUrl = false;
+                            
+                            links.forEach(function(a) {
+                                if (foundUrl) return; // Already found URL for this product
+                                
+                                var href = a.href;
+                                // Match Akakce product URL pattern: ends with ,{productId}.html
+                                if (href && href.match(/,\d+\.html$/)) {
+                                    if (!seen[href]) { 
+                                        seen[href] = true; 
+                                        urls.push(href);
+                                        foundUrl = true;
+                                    }
+                                }
+                            });
+                        });
+                    }
+                    
+                    // Fallback if main list not found - be more restrictive
+                    if (urls.length === 0) {
+                        document.querySelectorAll('ul.pl_v9 > li[data-pr] a[href]').forEach(function(a) {
                             var href = a.href;
-                            if (href && href.match(/,\d+\.html$/)) {
-                                if (!seen[href]) { seen[href] = true; urls.push(href); }
+                            if (href && href.match(/,\d+\.html$/) && !seen[href]) {
+                                seen[href] = true;
+                                urls.push(href);
                             }
                         });
-                    });
-                    document.querySelectorAll('a[href*=""fiyati""]').forEach(function(a) {
-                        var href = a.href;
-                        if (href && href.match(/,\d+\.html$/) && !seen[href]) { seen[href] = true; urls.push(href); }
-                    });
+                    }
+                    
                     return JSON.stringify(urls);
                 ");
                 

@@ -39,6 +39,13 @@ public class TrendyolScraperService
         
         try
         {
+            // Validate maxProducts to prevent excessive scraping
+            if (maxProducts > 2000)
+            {
+                await onProgress(0, "⚠️ Maximum 2000 products allowed per session. Limiting to 2000.", "warning");
+                maxProducts = 2000;
+            }
+            
             var methodName = scrapeMethod == ScrapeMethod.ScrapeDo ? "Scrape.do API" : "Selenium";
             await onProgress(0, $"Initializing scraper ({methodName})...", "info");
             
