@@ -300,7 +300,7 @@ public class TrendyolScraper : IDisposable
             var product = new ProductInfo 
             { 
                 ProductUrl = productUrl,
-                Source = "Gunes"
+                Source = "trendyol"
             };
             
             // EXTRACT PRODUCT ID from URL
@@ -411,71 +411,220 @@ public class TrendyolScraper : IDisposable
                     try
                     {
                         var jsExecutor = (IJavaScriptExecutor)_driver!;
+                        
+                        // Scroll to trigger lazy loading of images
+                        jsExecutor.ExecuteScript("window.scrollTo(0, 0);");
+                        await Task.Delay(300);
+                        jsExecutor.ExecuteScript("window.scrollTo(0, document.body.scrollHeight / 2);");
+                        await Task.Delay(300);
+                        jsExecutor.ExecuteScript("window.scrollTo(0, 0);");
+                        await Task.Delay(500);
+                        
                         var imageUrls = jsExecutor.ExecuteScript(@"
                             var images = [];
-                            document.querySelectorAll('[class*=""gallery""] img, img[src*=""productimages""]').forEach(img => {
-                                var alt = img.alt || '';
-                                if (alt.toLowerCase().includes('product stamp')) return;
-                                var src = img.src || img.getAttribute('data-src') || '';
-                                if (src && !images.includes(src)) images.push(src);
+                            var seen = {};
+                            
+                            // PRIORITY 1: Product image gallery container (MOST RELIABLE)
+                            // Target: div[data-testid='product-image-gallery-container'] img
+                            document.querySelectorAll('[data-testid=""product-image-gallery-container""] img').forEach(img => {
+                                var src = img.src || '';
+                                // Only accept JPG/PNG images from cdn.dsmcdn.com with product paths
+                                if (src && src.includes('cdn.dsmcdn.com') && 
+                                    (src.includes('/prod/') || src.includes('/ty')) &&
+                                    !src.endsWith('.svg') && !src.includes('.svg') &&
+                                    !seen[src]) {
+                                    seen[src] = true;
+                                    images.push(src);
+                                    console.log('Method 1 (gallery-container): ' + src);
+                                }
                             });
+                            
+                            // PRIORITY 2: Carousel slides with _carouselImage class
+                            if (images.length === 0) {
+                                document.querySelectorAll('img[class*=""_carouselImage""]').forEach(img => {
+                                    var src = img.src || '';
+                                    if (src && src.includes('cdn.dsmcdn.com') && 
+                                        (src.includes('/prod/') || src.includes('/ty')) &&
+                                        !src.endsWith('.svg') && !src.includes('.svg') &&
+                                        !seen[src]) {
+                                        seen[src] = true;
+                                        images.push(src);
+                                        console.log('Method 2 (_carouselImage): ' + src);
+                                    }
+                                });
+                            }
+                            
+                            // PRIORITY 3: Images with data-testid='image' inside carousel containers
+                            if (images.length === 0) {
+                                document.querySelectorAll('[class*=""_carouselSlide""] img[data-testid=""image""]').forEach(img => {
+                                    var src = img.src || '';
+                                    if (src && src.includes('cdn.dsmcdn.com') && 
+                                        !src.endsWith('.svg') && !src.includes('.svg') &&
+                                        !seen[src]) {
+                                        seen[src] = true;
+                                        images.push(src);
+                                        console.log('Method 3 (carousel slide): ' + src);
+                                    }
+                                });
+                            }
+                            
+                            // PRIORITY 4: Any img with _org_zoom.jpg or _org.jpg in the URL (product images)
+                            if (images.length === 0) {
+                                document.querySelectorAll('img[src*=""_org""]').forEach(img => {
+                                    var src = img.src || '';
+                                    if (src && src.includes('cdn.dsmcdn.com') && 
+                                        (src.includes('_org_zoom.jpg') || src.includes('_org.jpg')) &&
+                                        !seen[src]) {
+                                        seen[src] = true;
+                                        images.push(src);
+                                        console.log('Method 4 (_org pattern): ' + src);
+                                    }
+                                });
+                            }
+                            
+                            // PRIORITY 5: Images with mnresize in URL (Trendyol CDN resize pattern)
+                            if (images.length === 0) {
+                                document.querySelectorAll('img[src*=""mnresize""]').forEach(img => {
+                                    var src = img.src || '';
+                                    if (src && src.includes('cdn.dsmcdn.com') && 
+                                        !src.endsWith('.svg') && !src.includes('.svg') &&
+                                        !seen[src]) {
+                                        seen[src] = true;
+                                        images.push(src);
+                                        console.log('Method 5 (mnresize): ' + src);
+                                    }
+                                });
+                            }
+                            
+                            console.log('[Trendyol Images] Total found: ' + images.length + ' product images');
                             return images.join('|||');
                         ");
                         
                         if (imageUrls != null && !string.IsNullOrWhiteSpace(imageUrls.ToString()))
                         {
-                            foreach (var url in imageUrls.ToString()!.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries))
+                            var urls = imageUrls.ToString()!.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
+                            Console.WriteLine($"[Trendyol] Raw image URLs found: {urls.Length}");
+                            
+                            foreach (var url in urls)
                             {
                                 var imgUrl = url.Trim();
-                                if (imgUrl.StartsWith("//")) imgUrl = "https:" + imgUrl;
-                                else if (!imgUrl.StartsWith("http")) imgUrl = BaseUrl + imgUrl;
                                 
-                                if (imgUrl.Contains("automation", StringComparison.OrdinalIgnoreCase) || 
-                                    imgUrl.Contains("marketing", StringComparison.OrdinalIgnoreCase))
+                                // Normalize URL
+                                if (imgUrl.StartsWith("//")) 
+                                    imgUrl = "https:" + imgUrl;
+                                else if (!imgUrl.StartsWith("http")) 
+                                    imgUrl = "https:" + imgUrl;
+                                
+                                // STRICT FILTER: Only accept actual product images
+                                // Must be JPG/PNG, not SVG
+                                if (imgUrl.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) ||
+                                    imgUrl.Contains(".svg", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Console.WriteLine($"[Trendyol] SKIPPED SVG: {imgUrl}");
                                     continue;
+                                }
+                                
+                                // Skip non-product images
+                                if (imgUrl.Contains("sfint/prod/fp/", StringComparison.OrdinalIgnoreCase) || // Search/filter icons
+                                    imgUrl.Contains("automation", StringComparison.OrdinalIgnoreCase) || 
+                                    imgUrl.Contains("marketing", StringComparison.OrdinalIgnoreCase) ||
+                                    imgUrl.Contains("badge", StringComparison.OrdinalIgnoreCase) ||
+                                    imgUrl.Contains("/ty/", StringComparison.OrdinalIgnoreCase) || // Trendyol icons
+                                    imgUrl.Contains("/banner", StringComparison.OrdinalIgnoreCase) ||
+                                    imgUrl.Contains("static/", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Console.WriteLine($"[Trendyol] SKIPPED non-product: {imgUrl.Substring(0, Math.Min(60, imgUrl.Length))}...");
+                                    continue;
+                                }
                                 
                                 if (!allImages.Contains(imgUrl))
+                                {
                                     allImages.Add(imgUrl);
+                                    Console.WriteLine($"[Trendyol] ✓ Added image {allImages.Count}: {imgUrl.Substring(0, Math.Min(80, imgUrl.Length))}...");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("[Trendyol] ⚠ JavaScript returned no images!");
+                        }
+                    }
+                    catch (Exception imgEx)
+                    {
+                        Console.WriteLine($"[Trendyol] Image extraction error: {imgEx.Message}");
+                    }
+                }
+                
+                // Fallback: Parse HTML directly if Selenium didn't find images
+                if (allImages.Count == 0)
+                {
+                    Console.WriteLine("[Trendyol] Falling back to HTML parsing for images...");
+                    
+                    // Look for product images with _org pattern in src
+                    var imgNodes = htmlDoc.DocumentNode.SelectNodes("//img[contains(@src, 'cdn.dsmcdn.com') and (contains(@src, '_org') or contains(@src, 'mnresize'))]");
+                    if (imgNodes != null)
+                    {
+                        Console.WriteLine($"[Trendyol] HTML fallback found {imgNodes.Count} img nodes");
+                        
+                        foreach (var node in imgNodes)
+                        {
+                            var imgUrl = node.GetAttributeValue("src", "");
+                            
+                            if (string.IsNullOrEmpty(imgUrl))
+                                continue;
+                            
+                            // Skip SVG files
+                            if (imgUrl.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) ||
+                                imgUrl.Contains(".svg", StringComparison.OrdinalIgnoreCase))
+                                continue;
+                            
+                            // Skip non-product images
+                            if (imgUrl.Contains("sfint/prod/fp/") ||
+                                imgUrl.Contains("automation") || 
+                                imgUrl.Contains("marketing") || 
+                                imgUrl.Contains("badge") ||
+                                imgUrl.Contains("/ty/") ||
+                                imgUrl.Contains("static/"))
+                                continue;
+                            
+                            if (imgUrl.StartsWith("//")) imgUrl = "https:" + imgUrl;
+                            else if (!imgUrl.StartsWith("http")) imgUrl = "https:" + imgUrl;
+                            
+                            if (!allImages.Contains(imgUrl))
+                            {
+                                allImages.Add(imgUrl);
+                                Console.WriteLine($"[Trendyol] HTML fallback - Added image {allImages.Count}");
                             }
                         }
                     }
-                    catch { }
-                }
-                
-                if (allImages.Count == 0)
-                {
-                    var imgNodes = htmlDoc.DocumentNode.SelectNodes("//img[contains(@src, 'productimages')]");
-                    if (imgNodes != null)
+                    else
                     {
-                        foreach (var node in imgNodes)
-                        {
-                            var altText = node.GetAttributeValue("alt", "");
-                            if (altText.Contains("Product stamp", StringComparison.OrdinalIgnoreCase))
-                                continue;
-                            
-                            var imgUrl = node.GetAttributeValue("src", "") ?? node.GetAttributeValue("data-src", "");
-                            if (!string.IsNullOrEmpty(imgUrl))
-                            {
-                                if (imgUrl.StartsWith("//")) imgUrl = "https:" + imgUrl;
-                                else if (!imgUrl.StartsWith("http")) imgUrl = BaseUrl + imgUrl;
-                                
-                                if (!imgUrl.Contains("automation") && !imgUrl.Contains("marketing") && !allImages.Contains(imgUrl))
-                                    allImages.Add(imgUrl);
-                            }
-                        }
+                        Console.WriteLine("[Trendyol] ⚠ HTML parsing found no product img nodes!");
                     }
                 }
                 
                 if (allImages.Count > 0)
                 {
                     product.ImageUrl = allImages[0];
+                    Console.WriteLine($"[Trendyol] ✓ Set main image: {product.ImageUrl}");
+                    
                     for (int i = 1; i < allImages.Count; i++)
                     {
                         product.AdditionalImages.Add(allImages[i]);
                     }
+                    
+                    Console.WriteLine($"[Trendyol] ✓ Total images: {allImages.Count} (1 main + {product.AdditionalImages.Count} additional)");
+                }
+                else
+                {
+                    Console.WriteLine("[Trendyol] ⚠ WARNING: No product images found!");
+                    Console.WriteLine($"[Trendyol] Product URL: {productUrl}");
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Trendyol] Image extraction failed: {ex.Message}");
+            }
 
             // EXTRACT CATEGORY
             try

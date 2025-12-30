@@ -1,5 +1,34 @@
-﻿using Scrapper.Services;
-using OfficeOpenXml;
+﻿using OfficeOpenXml;
+using Scrapper.Models;
+using Scrapper.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Register configuration
+builder.Services.AddSingleton<CdnFtpConfig>();
+
+// Register CdnCacheService (needed by ImageProcessingService)
+builder.Services.AddSingleton<CdnCacheService>();
+
+// Register HttpClient properly
+builder.Services.AddHttpClient();
+
+// Modify ImageProcessingService registration to use IHttpClientFactory
+// OR register a singleton HttpClient (less recommended but simpler)
+builder.Services.AddSingleton<HttpClient>();
+
+// Register FTP service
+builder.Services.AddSingleton<FtpUploadService>();
+
+// Register HttpClient and ImageProcessingService together
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<ImageProcessingService>(sp =>
+{
+    var httpClient = new HttpClient();
+    var ftpService = sp.GetRequiredService<FtpUploadService>();
+    var cdnCache = sp.GetRequiredService<CdnCacheService>();
+    return new ImageProcessingService(httpClient, ftpService, cdnCache);
+});
 
 // Configure EPPlus license FIRST - before any ExcelPackage usage
 // EPPlus 8.x: Use License.SetLicenseContext or specific license methods
@@ -9,14 +38,14 @@ try
     ExcelPackage.License.SetNonCommercialOrganization("Personal");
     // OR
     // ExcelPackage.License.SetNonCommercialPersonal("Your Name");
-    
+
     Console.WriteLine("[EPPlus] License set to NonCommercial");
 }
 catch (Exception ex)
 {
     Console.WriteLine($"[EPPlus] License setup failed: {ex.Message}");
     Console.WriteLine("[EPPlus] Trying alternative license context...");
-    
+
     // Fallback: Try the old LicenseContext property (for EPPlus 5.x-7.x compatibility)
     try
     {
@@ -29,12 +58,16 @@ catch (Exception ex)
     }
 }
 
-var builder = WebApplication.CreateBuilder(args);
 
 // Add services
 builder.Services.AddSingleton<TrendyolScraperService>();
 builder.Services.AddSingleton<HepsiburadaScraperService>();
 builder.Services.AddSingleton<AkakceScraperService>(); // NEW: Akakce service
+builder.Services.AddSingleton<FtpUploadService>();
+builder.Services.AddSingleton<ImageProcessingService>();
+builder.Services.AddSingleton<BulkImageExcelReader>();
+builder.Services.AddSingleton<BulkImageProcessingService>();
+builder.Services.AddSingleton<BulkImageExcelExporter>();
 
 var app = builder.Build();
 
@@ -228,6 +261,10 @@ app.MapGet("/", () => Results.Content("""
                 <h3>📊 Akakce Scraper</h3>
                 <p>Price Comparison</p>
             </div>
+            <div class="nav-btn" onclick="window.location.href='/bulk-image'">
+                <h3>🖼️ Bulk Image Uploader</h3>
+                <p>Process & Upload Images</p>
+            </div>
         </div>
         
         <form id="scraperForm">
@@ -270,6 +307,7 @@ app.MapGet("/", () => Results.Content("""
                     <option value="trendyol_dryer">🌀 Trendyol Dryer (MediaMarkt)</option>
                     <option value="trendyol_klima">🌡️ Trendyol Klima (MediaMarkt)</option>
                     <option value="trendyol_water_heater">🚿 Trendyol Şofben (MediaMarkt)</option>
+                    <option value="trendyol_kombi">🔥 Trendyol Kombi (MediaMarkt)</option>
                 </select>
             </div>
             
@@ -658,6 +696,8 @@ app.MapGet("/akakce", () => Results.Content("""
             font-weight: 600;
         }
         
+        .download-link:hover { background: #45a049; transform: translateY(-2px); }
+        
         .example {
             background: #f8f9fa;
             padding: 15px;
@@ -682,6 +722,10 @@ app.MapGet("/akakce", () => Results.Content("""
             <div class="nav-btn active">
                 <h3>📊 Akakce Scraper</h3>
                 <p>Price Comparison</p>
+            </div>
+            <div class="nav-btn" onclick="window.location.href='/bulk-image'">
+                <h3>🖼️ Bulk Image Uploader</h3>
+                <p>Process & Upload Images</p>
             </div>
         </div>
         
@@ -950,6 +994,406 @@ app.MapGet("/akakce", () => Results.Content("""
 </html>
 """, "text/html"));
 
+// NEW: Bulk Image Uploader page
+app.MapGet("/bulk-image", () => Results.Content("""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulk Image Uploader</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+        }
+        
+        h1 { color: #333; margin-bottom: 10px; font-size: 2.5em; }
+        .subtitle { color: #666; margin-bottom: 30px; font-size: 1.1em; }
+        
+        .nav-buttons { display: flex; gap: 15px; margin-bottom: 30px; flex-wrap: wrap; }
+        
+        .nav-btn {
+            flex: 1;
+            min-width: 180px;
+            padding: 20px;
+            border: 2px solid #43e97b;
+            border-radius: 12px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+        
+        .nav-btn:hover { background: #43e97b; color: white; }
+        .nav-btn.active {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            color: white;
+            border-color: transparent;
+        }
+        
+        .nav-btn h3 { margin-bottom: 5px; font-size: 1em; }
+        .nav-btn p { font-size: 0.85em; opacity: 0.8; }
+        
+        .form-group { margin-bottom: 25px; }
+        
+        label { display: block; margin-bottom: 8px; color: #555; font-weight: 600; }
+        
+        .file-upload {
+            border: 3px dashed #ddd;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #fafafa;
+        }
+        
+        .file-upload:hover, .file-upload.dragover {
+            border-color: #43e97b;
+            background: #f0fff8;
+        }
+        
+        .file-upload input { display: none; }
+        .file-upload .icon { font-size: 3em; margin-bottom: 15px; }
+        .file-upload .text { color: #666; }
+        .file-upload .filename { color: #43e97b; font-weight: 600; margin-top: 10px; }
+        
+        .button-group { display: flex; gap: 10px; margin-top: 20px; }
+        
+        button {
+            padding: 15px 40px;
+            font-size: 1.1em;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: none;
+        }
+        
+        button:hover:not(:disabled) { transform: translateY(-2px); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        #uploadBtn {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            color: white;
+            flex: 2;
+        }
+        
+        #uploadBtn:hover:not(:disabled) { box-shadow: 0 10px 20px rgba(67, 233, 123, 0.3); }
+        
+        #stopBtn {
+            background: #f44336;
+            color: white;
+            flex: 1;
+            display: none;
+        }
+        
+        #resetBtn {
+            background: #757575;
+            color: white;
+            flex: 1;
+        }
+        
+        #progress { margin-top: 30px; display: none; }
+        
+        .progress-bar {
+            background: #f0f0f0;
+            border-radius: 10px;
+            height: 30px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+        
+        .progress-fill {
+            background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+        }
+        
+        #status { color: #555; font-size: 0.95em; max-height: 300px; overflow-y: auto; }
+        
+        .status-item { padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+        .success { color: #4CAF50; font-weight: 600; }
+        .error { color: #f44336; font-weight: 600; }
+        .warning { color: #ff9800; font-weight: 600; }
+        
+        .download-link {
+            display: inline-block;
+            background: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-weight: 600;
+        }
+        
+        .download-link:hover { background: #45a049; transform: translateY(-2px); }
+        
+        .info-box {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-size: 0.9em;
+        }
+        
+        .info-box strong { color: #43e97b; }
+        .info-box ul { margin: 10px 0 0 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖼️ Bulk Image Uploader</h1>
+        <p class="subtitle">Process and upload multiple images to CDN</p>
+        
+        <div class="nav-buttons">
+            <div class="nav-btn" onclick="window.location.href='/'">
+                <h3>🏪 Category Scraper</h3>
+                <p>Trendyol & Hepsiburada</p>
+            </div>
+            <div class="nav-btn" onclick="window.location.href='/akakce'">
+                <h3>📊 Akakce Scraper</h3>
+                <p>Price Comparison</p>
+            </div>
+            <div class="nav-btn active">
+                <h3>🖼️ Bulk Image Uploader</h3>
+                <p>Process & Upload Images</p>
+            </div>
+        </div>
+        
+        <form id="bulkImageForm">
+            <div class="form-group">
+                <label>Upload Excel File with Image URLs</label>
+                <div class="file-upload" id="dropZone">
+                    <input type="file" id="excelFile" accept=".xlsx,.xls">
+                    <div class="icon">📁</div>
+                    <div class="text">
+                        <strong>Click to upload</strong> or drag and drop<br>
+                        Excel file (.xlsx, .xls)
+                    </div>
+                    <div class="filename" id="fileName"></div>
+                </div>
+            </div>
+            
+            <div class="info-box">
+                <strong>📋 Excel File Format:</strong>
+                <ul>
+                    <li>✅ Supports MULTIPLE columns with image URLs</li>
+                    <li>✅ Automatically detects image URLs in ANY column</li>
+                    <li>✅ Non-image columns are preserved EXACTLY as they are</li>
+                    <li>Supports jpg, jpeg, png, gif, webp formats</li>
+                    <li>Images will be downloaded, resized to 1000x1000, and uploaded to CDN</li>
+                    <li>Example: Column A = Product Name, Column B = Image 1, Column C = Price, Column D = Image 2</li>
+                </ul>
+            </div>
+            
+            <div class="info-box">
+                <strong>⚙️ Processing Steps:</strong>
+                <ul>
+                    <li>✓ Scans ALL columns and identifies image URLs automatically</li>
+                    <li>✓ Downloads images from identified URL columns</li>
+                    <li>✓ Adds watermark and resizes to 1000x1000px</li>
+                    <li>✓ Uploads processed images to FTP/CDN</li>
+                    <li>✓ Replaces image URLs with CDN URLs (green highlight)</li>
+                    <li>✓ Preserves all other columns without any changes (white background)</li>
+                    <li>✓ Generates summary report showing which columns were processed</li>
+                </ul>
+            </div>
+            
+            <div class="button-group">
+                <button type="submit" id="uploadBtn" disabled>🚀 Start Processing</button>
+                <button type="button" id="stopBtn" onclick="stopProcessing()">⏹️ Stop</button>
+                <button type="button" id="resetBtn" onclick="resetForm()">🔄 Reset</button>
+            </div>
+        </form>
+        
+        <div id="progress">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+            <div id="status"></div>
+        </div>
+    </div>
+    
+    <script>
+        let selectedFile = null;
+        let abortController = null;
+        let isRunning = false;
+        let sessionId = null;
+        
+        // File upload handlers
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('excelFile');
+        const fileName = document.getElementById('fileName');
+        const uploadBtn = document.getElementById('uploadBtn');
+        
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
+        });
+        
+        function handleFile(file) {
+            if (!file.name.match(/\.(xlsx|xls)$/i)) {
+                alert('Please upload an Excel file (.xlsx or .xls)');
+                return;
+            }
+            selectedFile = file;
+            fileName.textContent = '✓ ' + file.name;
+            uploadBtn.disabled = false;
+        }
+        
+        function resetForm() {
+            if (isRunning) stopProcessing();
+            selectedFile = null;
+            fileInput.value = '';
+            fileName.textContent = '';
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = '🚀 Start Processing';
+            document.getElementById('stopBtn').style.display = 'none';
+            document.getElementById('progress').style.display = 'none';
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressFill').textContent = '0%';
+            document.getElementById('status').innerHTML = '';
+        }
+        
+        async function stopProcessing() {
+            if (sessionId) {
+                try { await fetch('/api/bulk-image/stop/' + sessionId, { method: 'POST' }); } catch (e) {}
+            }
+            if (abortController) abortController.abort();
+            isRunning = false;
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = '🚀 Start Processing';
+            document.getElementById('stopBtn').style.display = 'none';
+            
+            const statusItem = document.createElement('div');
+            statusItem.className = 'status-item warning';
+            statusItem.textContent = '⚠️ Processing stopped. Check for partial results below.';
+            document.getElementById('status').insertBefore(statusItem, document.getElementById('status').firstChild);
+        }
+        
+        document.getElementById('bulkImageForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!selectedFile) return;
+            
+            sessionId = Date.now().toString();
+            abortController = new AbortController();
+            isRunning = true;
+            
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Processing...';
+            document.getElementById('stopBtn').style.display = 'block';
+            document.getElementById('progress').style.display = 'block';
+            document.getElementById('status').innerHTML = '<div class="status-item">Starting image processing...</div>';
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                formData.append('sessionId', sessionId);
+                
+                const response = await fetch('/api/bulk-image/process', {
+                    method: 'POST',
+                    body: formData,
+                    signal: abortController.signal
+                });
+                
+                if (!response.ok) throw new Error('Processing failed');
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const text = decoder.decode(value);
+                    const lines = text.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.substring(6));
+                                
+                                if (data.progress !== undefined) {
+                                    document.getElementById('progressFill').style.width = data.progress + '%';
+                                    document.getElementById('progressFill').textContent = data.progress + '%';
+                                }
+                                
+                                if (data.message) {
+                                    const statusItem = document.createElement('div');
+                                    statusItem.className = 'status-item';
+                                    if (data.type === 'success') statusItem.className += ' success';
+                                    else if (data.type === 'error') statusItem.className += ' error';
+                                    statusItem.textContent = data.message;
+                                    document.getElementById('status').insertBefore(statusItem, document.getElementById('status').firstChild);
+                                }
+                                
+                                if (data.downloadUrl) {
+                                    const link = document.createElement('a');
+                                    link.href = data.downloadUrl;
+                                    link.className = 'download-link';
+                                    link.textContent = '📥 Download Results';
+                                    link.download = data.fileName;
+                                    document.getElementById('status').insertBefore(link, document.getElementById('status').firstChild);
+                                }
+                                
+                                if (data.complete) {
+                                    isRunning = false;
+                                    uploadBtn.disabled = false;
+                                    uploadBtn.textContent = '🚀 Start Processing';
+                                    document.getElementById('stopBtn').style.display = 'none';
+                                }
+                            } catch (parseErr) {}
+                        }
+                    }
+                }
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    document.getElementById('status').innerHTML = '<div class="status-item error">Error: ' + error.message + '</div>';
+                }
+                isRunning = false;
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = '🚀 Start Processing';
+                document.getElementById('stopBtn').style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
+""", "text/html"));
+
 // Stop endpoints for cancelling scraping sessions
 app.MapPost("/api/stop/{sessionId}", (string sessionId) =>
 {
@@ -964,6 +1408,76 @@ app.MapPost("/api/akakce/stop/{sessionId}", (string sessionId) =>
     AkakceScraperService.StopSession(sessionId);
     Console.WriteLine($"[API] Akakce stop requested for session: {sessionId}");
     return Results.Ok(new { message = "Stop signal sent" });
+});
+
+app.MapPost("/api/bulk-image/stop/{sessionId}", (string sessionId) =>
+{
+    BulkImageProcessingService.StopSession(sessionId);
+    Console.WriteLine($"[API] Bulk image stop requested for session: {sessionId}");
+    return Results.Ok(new { message = "Stop signal sent" });
+});
+
+// NEW: Bulk image processing endpoint
+app.MapPost("/api/bulk-image/process", async (HttpRequest request, BulkImageProcessingService bulkImageService) =>
+{
+    return Results.Stream(async (stream) =>
+    {
+        var writer = new StreamWriter(stream);
+        
+        try
+        {
+            var form = await request.ReadFormAsync();
+            var file = form.Files.GetFile("file");
+            var sessionId = form["sessionId"].ToString();
+            
+            if (file == null || file.Length == 0)
+            {
+                var errorData = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    progress = 100,
+                    message = "No file uploaded",
+                    type = "error",
+                    complete = true
+                });
+                await writer.WriteLineAsync($"data: {errorData}\n");
+                await writer.FlushAsync();
+                return;
+            }
+            
+            using var memoryStream = new MemoryStream();
+            await file.CopyToAsync(memoryStream);
+            memoryStream.Position = 0;
+            
+            await bulkImageService.ProcessExcelAsync(
+                memoryStream,
+                hasHeader: true,
+                async (progress, message, type) =>
+                {
+                    var data = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        progress,
+                        message,
+                        type
+                    });
+                    await writer.WriteLineAsync($"data: {data}\n");
+                    await writer.FlushAsync();
+                },
+                sessionId
+            );
+        }
+        catch (Exception ex)
+        {
+            var errorData = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                progress = 100,
+                message = $"Error: {ex.Message}",
+                type = "error",
+                complete = true
+            });
+            await writer.WriteLineAsync($"data: {errorData}\n");
+            await writer.FlushAsync();
+        }
+    }, "text/event-stream");
 });
 
 // NEW: Akakce category URL scraping endpoint
@@ -1164,6 +1678,7 @@ Console.WriteLine("🚀 Scrapper Web Application");
 Console.WriteLine("📍 Open your browser and navigate to: http://localhost:5000");
 Console.WriteLine("   - Category Scraper: http://localhost:5000/");
 Console.WriteLine("   - Akakce Scraper: http://localhost:5000/akakce");
+Console.WriteLine("   - Bulk Image Uploader: http://localhost:5000/bulk-image");
 Console.WriteLine("Press Ctrl+C to stop the server");
 
 app.Run("http://localhost:5000");
