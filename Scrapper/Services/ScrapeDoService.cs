@@ -1,5 +1,6 @@
 using Scrapper.Models;
 using System.Text.RegularExpressions;
+using System.Web;
 
 namespace Scrapper.Services;
 
@@ -38,7 +39,6 @@ public class ScrapeDoService
         var originalQuery = uri.Query;
         
         string pageParam = isHepsiburada ? "sayfa" : "pi";
-        // Support large scrapes up to 2000 products
         int maxPages = Math.Max(150, (maxProducts / 24) + 15);
         int page = 1;
         int emptyPageCount = 0;
@@ -69,17 +69,17 @@ public class ScrapeDoService
                     }
                 }
                 
-                Console.WriteLine($"[{platform}] Page {page}...");
+                Console.WriteLine($"[{platform}] Page {page}: {paginatedUrl}");
                 
                 var html = await GetPageHtmlAsync(paginatedUrl);
                 var htmlDoc = new HtmlAgilityPack.HtmlDocument();
                 htmlDoc.LoadHtml(html);
                 
+                Console.WriteLine($"[{platform}] HTML length: {html.Length} chars");
+                
                 int linksBeforePage = productLinks.Count;
                 
-                var linkNodes = htmlDoc.DocumentNode.SelectNodes("//a[contains(@href, '-p-')]");
-                
-                // For Trendyol: Get ad product links from widget-container to exclude
+                // For Trendyol: Get ad product links to exclude
                 var adLinks = new HashSet<string>();
                 if (!isHepsiburada)
                 {
@@ -97,41 +97,191 @@ public class ScrapeDoService
                             }
                         }
                     }
-                    
-                    if (adLinks.Count > 0)
-                    {
-                        Console.WriteLine($"[{platform}] Excluding {adLinks.Count} ad products from widget-container");
-                    }
                 }
                 
-                if (linkNodes != null)
+                // Try multiple patterns for Hepsiburada
+                HtmlAgilityPack.HtmlNodeCollection? linkNodes = null;
+                
+                if (isHepsiburada)
                 {
+                    // Get ALL links, we'll filter them properly
+                    linkNodes = htmlDoc.DocumentNode.SelectNodes("//a[@href]");
+                    Console.WriteLine($"[{platform}] Total <a> tags: {linkNodes?.Count ?? 0}");
+                }
+                else
+                {
+                    // Trendyol pattern
+                    linkNodes = htmlDoc.DocumentNode.SelectNodes("//a[contains(@href, '-p-')]");
+                }
+                
+                if (linkNodes != null && linkNodes.Count > 0)
+                {
+                    Console.WriteLine($"[{platform}] Processing {linkNodes.Count} links...");
+                    
+                    int candidateCount = 0;
+                    int rejectedCategory = 0;
+                    int rejectedNoPattern = 0;
+                    int fromAdRedirects = 0;
+                    
                     foreach (var node in linkNodes)
                     {
                         if (productLinks.Count >= maxProducts) break;
                         
                         var href = node.GetAttributeValue("href", "");
-                        if (string.IsNullOrEmpty(href) || !href.Contains("-p-")) continue;
-                        
-                        // Validate URL pattern
-                        if (isHepsiburada && !Regex.IsMatch(href, @"-(pm?)-[A-Z0-9]+", RegexOptions.IgnoreCase))
-                            continue;
+                        if (string.IsNullOrEmpty(href)) continue;
                         
                         var baseUrl = isHepsiburada ? "https://www.hepsiburada.com" : "https://www.trendyol.com";
                         var fullUrl = href.StartsWith("http") ? href : baseUrl + href;
-                        var cleanUrl = fullUrl.Split('?')[0];
+                        var cleanUrl = fullUrl;
                         
-                        // Skip ad products for Trendyol
-                        if (!isHepsiburada && adLinks.Contains(cleanUrl))
+                        // SPECIAL: Handle adservice redirect links (sponsored products)
+                        if (isHepsiburada && fullUrl.Contains("adservice.hepsiburada.com") && fullUrl.Contains("redirect="))
+                        {
+                            try
+                            {
+                                // IMPORTANT: HTML attributes may have &amp; instead of &
+                                // Decode HTML entities first
+                                var decodedHref = System.Net.WebUtility.HtmlDecode(fullUrl);
+                                
+                                Console.WriteLine($"[{platform}] Found adservice link, decoding...");
+                                
+                                // Extract redirect parameter using Uri and query parsing
+                                var adUri = new Uri(decodedHref);
+                                var queryParams = System.Web.HttpUtility.ParseQueryString(adUri.Query);
+                                var redirectParam = queryParams.Get("redirect");
+                                
+                                if (!string.IsNullOrEmpty(redirectParam))
+                                {
+                                    // The redirect param is already URL-decoded by ParseQueryString
+                                    // But we need to clean it - remove query params from the product URL itself
+                                    cleanUrl = redirectParam.Split('?')[0].Split('#')[0];
+                                    
+                                    Console.WriteLine($"[{platform}] Ad redirect extracted: {cleanUrl}");
+                                    
+                                    // Check if it's a valid product URL
+                                    if (cleanUrl.Contains("-p-") && !cleanUrl.Contains("-c-") && !productLinks.Contains(cleanUrl))
+                                    {
+                                        productLinks.Add(cleanUrl);
+                                        candidateCount++;
+                                        fromAdRedirects++;
+                                        
+                                        if (productLinks.Count <= 10)
+                                        {
+                                            Console.WriteLine($"[{platform}] #{productLinks.Count}: {cleanUrl} (from ad)");
+                                        }
+                                    }
+                                    continue;
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[{platform}] No redirect param found in: {decodedHref.Substring(0, Math.Min(100, decodedHref.Length))}...");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[{platform}] Error extracting ad redirect: {ex.Message}");
+                            }
+                        }
+                        
+                        // Skip other adservice/tracking links
+                        if (cleanUrl.Contains("adservice") || 
+                            cleanUrl.Contains("/track") || 
+                            cleanUrl.Contains("/event") ||
+                            cleanUrl.Contains("banner") ||
+                            cleanUrl.Contains("campaign") ||
+                            cleanUrl.Contains("widget") ||
+                            cleanUrl.Contains("/hesabim") ||
+                            cleanUrl.Contains("/siparislerim") ||
+                            cleanUrl.Contains("/favorilerim") ||
+                            cleanUrl.Contains("/magaza/") ||
+                            cleanUrl.EndsWith("hepsiburada.com/") ||
+                            cleanUrl == "https://www.hepsiburada.com")
                         {
                             continue;
                         }
                         
-                        if (!productLinks.Contains(cleanUrl))
+                        // Clean URL for regular links
+                        cleanUrl = fullUrl.Split('?')[0].Split('#')[0];
+                        
+                        // Validate product URL
+                        bool isValidProduct = false;
+                        
+                        if (isHepsiburada)
+                        {
+                            // Must be from hepsiburada.com
+                            if (!cleanUrl.Contains("hepsiburada.com")) continue;
+                            
+                            var pathPart = cleanUrl.Split(new[] { "hepsiburada.com" }, StringSplitOptions.None);
+                            if (pathPart.Length < 2) continue;
+                            var path = pathPart[1];
+                            
+                            // CRITICAL: Skip category pages (contain -c- in path)
+                            if (path.Contains("-c-"))
+                            {
+                                rejectedCategory++;
+                                continue; // This is a category, not a product
+                            }
+                            
+                            // Pattern 1: Contains -p- (most common)
+                            if (path.Contains("-p-"))
+                            {
+                                isValidProduct = true;
+                            }
+                            // Pattern 2: Contains /p-
+                            else if (path.Contains("/p-"))
+                            {
+                                isValidProduct = true;
+                            }
+                            // Pattern 3: Ends with HB product code
+                            else if (Regex.IsMatch(path, @"/[a-z0-9-]+-HB[A-Z0-9]{10,}$", RegexOptions.IgnoreCase))
+                            {
+                                isValidProduct = true;
+                            }
+                            // Pattern 4: Long product-looking path with alphanumeric code at end
+                            // BUT MUST NOT contain -c- (category indicator)
+                            else if (!path.Contains("filtreler") &&
+                                     !path.EndsWith("/") &&
+                                     path.Split('/').Length == 2 && 
+                                     path.Length > 20 &&
+                                     Regex.IsMatch(path, @"[A-Z0-9]{8,}$", RegexOptions.IgnoreCase))
+                            {
+                                isValidProduct = true;
+                            }
+                            else
+                            {
+                                rejectedNoPattern++;
+                                // Log first few rejections
+                                if (rejectedNoPattern <= 5)
+                                {
+                                    Console.WriteLine($"[{platform}] REJECTED (no pattern): {cleanUrl}");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Trendyol validation
+                            isValidProduct = cleanUrl.Contains("-p-") && !adLinks.Contains(cleanUrl);
+                        }
+                        
+                        if (isValidProduct && !productLinks.Contains(cleanUrl))
                         {
                             productLinks.Add(cleanUrl);
+                            candidateCount++;
+                            
+                            if (productLinks.Count <= 10)
+                            {
+                                Console.WriteLine($"[{platform}] #{productLinks.Count}: {cleanUrl}");
+                            }
                         }
                     }
+                    
+                    var adInfo = fromAdRedirects > 0 ? $" (including {fromAdRedirects} from ads)" : "";
+                    Console.WriteLine($"[{platform}] Found {candidateCount} new product links{adInfo} from {linkNodes.Count} total links");
+                    Console.WriteLine($"[{platform}] Rejected: Category={rejectedCategory}, NoPattern={rejectedNoPattern}");
+                }
+                else
+                {
+                    Console.WriteLine($"[{platform}] ? No links found in HTML!");
                 }
                 
                 int newLinks = productLinks.Count - linksBeforePage;

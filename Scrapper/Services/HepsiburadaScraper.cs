@@ -1,4 +1,4 @@
-using HtmlAgilityPack;
+﻿using HtmlAgilityPack;
 using Scrapper.Models;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -73,14 +73,13 @@ public class HepsiburadaScraper : IDisposable
             
             if (onProgress != null)
             {
-                await onProgress(5, $"?? Finding products (target: {maxProducts})...", "info");
+                await onProgress(5, $"🔍 Finding products (target: {maxProducts})...", "info");
             }
             
             int page = 1;
             // Hepsiburada shows ~36 products per page, support up to 2000 products
             int productsPerPage = 36;
             int maxPages = Math.Max(100, (maxProducts / productsPerPage) + 15);
-            int previousCount = 0;
             int consecutiveEmptyPages = 0;
             int consecutiveNoNewProducts = 0;
             
@@ -88,35 +87,27 @@ public class HepsiburadaScraper : IDisposable
             
             while (page <= maxPages && productLinks.Count < maxProducts)
             {
-                // Build paginated URL preserving original query string exactly
+                // Build paginated URL - Hepsiburada uses "sayfa" parameter
                 string paginatedUrl;
                 
                 if (page == 1)
                 {
-                    // First page - use original URL as-is
                     paginatedUrl = categoryUrl.StartsWith("http") ? categoryUrl : "https://" + categoryUrl;
                 }
                 else
                 {
-                    // For subsequent pages, carefully append/replace sayfa parameter
+                    // Hepsiburada pagination: ?sayfa=X or &sayfa=X
                     if (string.IsNullOrEmpty(originalQuery))
                     {
-                        // No existing query params
                         paginatedUrl = $"{basePath}?sayfa={page}";
                     }
                     else
                     {
-                        // Has existing query params - preserve them and add/update sayfa
                         var queryWithoutQuestionMark = originalQuery.TrimStart('?');
-                        
-                        // Remove any existing sayfa parameter
                         var queryParts = queryWithoutQuestionMark.Split('&')
                             .Where(p => !p.StartsWith("sayfa=", StringComparison.OrdinalIgnoreCase))
                             .ToList();
-                        
-                        // Add the new sayfa parameter
                         queryParts.Add($"sayfa={page}");
-                        
                         paginatedUrl = $"{basePath}?{string.Join("&", queryParts)}";
                     }
                 }
@@ -126,28 +117,27 @@ public class HepsiburadaScraper : IDisposable
                 
                 _driver!.Navigate().GoToUrl(paginatedUrl);
                 
-                var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(25));
+                // Wait for page to load - look for product cards OR any content
+                var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(20));
                 
-                // Try multiple selectors - search pages may use different CSS classes
-                bool foundProducts = false;
                 try
                 {
-                    // Wait for any product link to appear - increased timeout for search pages
+                    // Wait for product content to load - multiple possible selectors
                     wait.Until(d => 
-                        d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0 ||
+                        d.FindElements(By.CssSelector("[data-test-id='product-card-item']")).Count > 0 ||
                         d.FindElements(By.CssSelector("[class*='productCard']")).Count > 0 ||
-                        d.FindElements(By.CssSelector("[data-test-id='product-card-item']")).Count > 0
+                        d.FindElements(By.CssSelector("li[class*='product']")).Count > 0 ||
+                        d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0 ||
+                        d.FindElements(By.CssSelector("a[href*='/p-']")).Count > 0
                     );
-                    foundProducts = true;
                 }
                 catch 
                 {
-                    Console.WriteLine($"[Hepsiburada] ? No products found on page {page} (timeout)");
+                    Console.WriteLine($"[Hepsiburada] ⚠ No products found on page {page} (timeout)");
                     consecutiveEmptyPages++;
                     if (consecutiveEmptyPages >= 3)
                     {
-                        Console.WriteLine($"[Hepsiburada] ? Reached end of results (3 consecutive empty pages)");
-                        Console.Out.Flush();
+                        Console.WriteLine($"[Hepsiburada] ⛔ Reached end of results (3 consecutive empty pages)");
                         break;
                     }
                     page++;
@@ -155,157 +145,290 @@ public class HepsiburadaScraper : IDisposable
                     continue;
                 }
                 
-                // Reset empty page counter on success
                 consecutiveEmptyPages = 0;
                 
-                // More aggressive scrolling for search pages with lazy loading
-                for (int i = 0; i < 12; i++)
+                // Aggressive scrolling to load all lazy-loaded products
+                Console.WriteLine($"[Hepsiburada] Scrolling to load all products...");
+                for (int i = 0; i < 15; i++)
                 {
-                    ((IJavaScriptExecutor)_driver).ExecuteScript($"window.scrollTo(0, document.body.scrollHeight * {(i + 1) / 12.0});");
-                    await Task.Delay(200);
+                    ((IJavaScriptExecutor)_driver).ExecuteScript($"window.scrollTo(0, document.body.scrollHeight * {(i + 1) / 15.0});");
+                    await Task.Delay(300);
                 }
                 
-                // Scroll back to top and then to bottom again to trigger any remaining lazy loads
+                // Scroll back to top and down again
                 ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, 0);");
-                await Task.Delay(300);
+                await Task.Delay(500);
                 ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
-                await Task.Delay(800);
+                await Task.Delay(1000);
 
-                // Extract links from current page using multiple methods
+                // Extract product links using comprehensive JavaScript
                 var jsExecutor = (IJavaScriptExecutor)_driver;
                 var productUrls = jsExecutor.ExecuteScript(@"
                     var links = [];
                     var seen = {};
+                    var stats = { 
+                        totalATags: 0,
+                        productCards: 0,
+                        fromCards: 0,
+                        fromDirectLinks: 0,
+                        fromAdRedirects: 0,
+                        rejected: { category: 0, duplicate: 0, noPattern: 0, nonProduct: 0 }
+                    };
                     
-                    // Hepsiburada product URL pattern: /{name}-p-{CODE}
-                    // We need to be more specific - only actual product cards
+                    console.log('[HB] Starting product link extraction...');
                     
-                    // Method 1: Product cards (highest priority)
-                    document.querySelectorAll('article.product, li.product, div[class*=""productListContent""]').forEach(function(card) {
-                        var link = card.querySelector('a[href*=""-p-""]');
-                        if (link && link.href) {
-                            var href = link.href;
-                            if (href.includes('-p-') && !seen[href]) {
-                                seen[href] = true;
-                                links.push(href);
+                    // DEBUG: First, let's see what product containers exist on the page
+                    var debugInfo = {
+                        'li.productListContent': document.querySelectorAll('li.productListContent-zAP0Y').length,
+                        'li with product class': document.querySelectorAll('li[class*=""product""]').length,
+                        'article product': document.querySelectorAll('article[class*=""product""]').length,
+                        'div productListContent': document.querySelectorAll('div[class*=""productListContent""]').length,
+                        'all li in ul': document.querySelectorAll('ul > li').length,
+                        'links with -p-': document.querySelectorAll('a[href*=""-p-""]').length,
+                        'ad service links': document.querySelectorAll('a[href*=""adservice.hepsiburada.com""]').length
+                    };
+                    console.log('[HB] Debug selectors: ' + JSON.stringify(debugInfo));
+                    
+                    // METHOD 1: Find ALL links (including ad service links)
+                    var productLinks = document.querySelectorAll('a[href]');
+                    console.log('[HB] Found ' + productLinks.length + ' total links');
+                    
+                    productLinks.forEach(function(link) {
+                        var href = link.href;
+                        if (!href || !href.includes('hepsiburada.com')) return;
+                        
+                        var cleanHref = href;
+                        var isAdLink = false;
+                        
+                        // CHECK 1: Is this an ad service link with redirect parameter?
+                        if (href.includes('adservice.hepsiburada.com') && href.includes('redirect=')) {
+                            // Extract the product title from the link element to verify it's a product
+                            var title = link.getAttribute('title') || '';
+                            
+                            // Check if this looks like a product ad (has title and redirect)
+                            if (title.length > 0 && href.includes('eventName=sp-click')) {
+                                // Use the adservice URL as-is - Selenium will follow the redirect
+                                cleanHref = href;
+                                isAdLink = true;
+                                
+                                // Skip if already seen
+                                if (seen[cleanHref]) {
+                                    stats.rejected.duplicate++;
+                                    return;
+                                }
+                                
+                                seen[cleanHref] = true;
+                                links.push(cleanHref);
+                                stats.fromAdRedirects++;
+                                console.log('[HB] Added ad link: ' + title);
+                                return;
                             }
                         }
-                    });
-                    
-                    // Method 2: Direct product links in product cards with data-test-id
-                    document.querySelectorAll('[data-test-id=""product-card-item""] a[href*=""-p-""]').forEach(function(link) {
-                        var href = link.href;
-                        if (href && href.includes('-p-') && !seen[href]) {
-                            seen[href] = true;
-                            links.push(href);
+                        
+                        // CHECK 2: Skip other adservice links (tracking, non-product)
+                        if (href.includes('adservice') || 
+                            href.includes('/track') || 
+                            href.includes('/event')) {
+                            if (!isAdLink) {
+                                stats.rejected.nonProduct++;
+                            }
+                            return;
+                        }
+                        
+                        // CHECK 3: Regular product link processing
+                        cleanHref = href.split('?')[0].split('#')[0];
+                        
+                        // Skip if already seen
+                        if (seen[cleanHref]) {
+                            stats.rejected.duplicate++;
+                            return;
+                        }
+                        
+                        // Skip category pages
+                        if (cleanHref.includes('-c-')) {
+                            stats.rejected.category++;
+                            return;
+                        }
+                        
+                        // Skip non-product links
+                        if (cleanHref.includes('/hesabim') ||
+                            cleanHref.includes('/magaza/') ||
+                            cleanHref.includes('/liste/') ||
+                            cleanHref.includes('/ara?')) {
+                            stats.rejected.nonProduct++;
+                            return;
+                        }
+                        
+                        // Must contain -p- (product indicator)
+                        if (cleanHref.includes('-p-')) {
+                            seen[cleanHref] = true;
+                            links.push(cleanHref);
+                            stats.fromDirectLinks++;
                         }
                     });
                     
-                    // Method 3: Product list items
-                    document.querySelectorAll('ul[class*=""product""] li a[href*=""-p-""], ol[class*=""product""] li a[href*=""-p-""]').forEach(function(link) {
-                        var href = link.href;
-                        if (href && href.includes('-p-') && !seen[href]) {
-                            seen[href] = true;
-                            links.push(href);
-                        }
-                    });
+                    console.log('[HB] Total unique product links: ' + links.length);
+                    console.log('[HB] From direct links: ' + stats.fromDirectLinks);
+                    console.log('[HB] From ad redirects: ' + stats.fromAdRedirects);
+                    stats.productCards = links.length;
+                    stats.totalATags = productLinks.length;
                     
-                    // Method 4: Fallback - but ONLY first link in any container with -p-
-                    if (links.length === 0) {
-                        document.querySelectorAll('a[href*=""-p-""]').forEach(function(link) {
+                    // If we found less than expected, try additional patterns
+                    if (links.length < 30) {
+                        console.log('[HB] Trying additional patterns...');
+                        
+                        // Try /p- pattern
+                        document.querySelectorAll('a[href*=""/p-""]').forEach(function(link) {
                             var href = link.href;
-                            if (href && href.includes('-p-') && !seen[href]) {
-                                // Check if this is actually a product link (not category/filter/etc)
-                                if (href.match(/\/[^\/]+-p-[A-Z0-9]+$/)) {
-                                    seen[href] = true;
-                                    links.push(href);
-                                }
+                            if (!href || !href.includes('hepsiburada.com')) return;
+                            
+                            var cleanHref = href.split('?')[0].split('#')[0];
+                            if (seen[cleanHref]) return;
+                            if (cleanHref.includes('-c-')) return;
+                            
+                            seen[cleanHref] = true;
+                            links.push(cleanHref);
+                            stats.fromCards++;
+                        });
+                        
+                        // Try links ending with HB product codes
+                        document.querySelectorAll('a[href*=""hepsiburada.com""]').forEach(function(link) {
+                            var href = link.href;
+                            if (!href) return;
+                            
+                            var cleanHref = href.split('?')[0].split('#')[0];
+                            if (seen[cleanHref]) return;
+                            if (cleanHref.includes('-c-')) return;
+                            
+                            // Match pattern: ends with HB followed by alphanumeric
+                            if (cleanHref.match(/HB[A-Z0-9]{8,}$/i)) {
+                                seen[cleanHref] = true;
+                                links.push(cleanHref);
+                                stats.fromCards++;
                             }
                         });
                     }
                     
-                    console.log('Found ' + links.length + ' product links on page');
-                    return links.join('|||');
+                    console.log('[HB] Final total: ' + links.length + ' unique product links');
+                    console.log('[HB] Stats: DirectLinks=' + stats.fromDirectLinks + ', AdRedirects=' + stats.fromAdRedirects + ', Additional=' + stats.fromCards);
+                    console.log('[HB] Rejected: Category=' + stats.rejected.category + ', Duplicate=' + stats.rejected.duplicate + ', NonProduct=' + stats.rejected.nonProduct);
+                    
+                    // Show sample
+                    if (links.length > 0) {
+                        console.log('[HB] Sample:');
+                        for (var i = 0; i < Math.min(5, links.length); i++) {
+                            console.log('  ' + links[i]);
+                        }
+                    }
+                    
+                    return JSON.stringify({
+                        links: links,
+                        stats: stats
+                    });
                 ");
                 
                 int newLinksOnPage = 0;
                 int rawLinksCount = 0;
+                int productCardsFound = 0;
+                int fromAdRedirects = 0;
                 
                 if (productUrls != null && !string.IsNullOrWhiteSpace(productUrls.ToString()))
                 {
-                    var urls = productUrls.ToString()!.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
-                    rawLinksCount = urls.Length;
-                    Console.WriteLine($"[Hepsiburada] Raw links found on page {page}: {rawLinksCount}");
-                    
-                    foreach (var url in urls)
+                    try
                     {
-                        if (productLinks.Count >= maxProducts) break;
+                        using var doc = JsonDocument.Parse(productUrls.ToString()!);
                         
-                        var cleanUrl = url.Split('?')[0].Split('#')[0];
-                        
-                        // Strict validation: URL must end with -p-{CODE} pattern
-                        // Example: /product-name-p-HBCV00007XO59V
-                        if (Regex.IsMatch(cleanUrl, @"^https?://[^/]+/[^/]+-p-[A-Z0-9]+$", RegexOptions.IgnoreCase))
+                        // Extract stats
+                        if (doc.RootElement.TryGetProperty("stats", out var statsElem))
                         {
-                            if (!productLinks.Contains(cleanUrl))
+                            if (statsElem.TryGetProperty("productCards", out var cardsElem))
+                                productCardsFound = cardsElem.GetInt32();
+                            if (statsElem.TryGetProperty("fromAdRedirects", out var adRedirectsElem))
+                                fromAdRedirects = adRedirectsElem.GetInt32();
+                        }
+                        
+                        // Extract links
+                        if (doc.RootElement.TryGetProperty("links", out var linksElem))
+                        {
+                            var linksList = new List<string>();
+                            foreach (var linkElem in linksElem.EnumerateArray())
                             {
-                                productLinks.Add(cleanUrl);
-                                newLinksOnPage++;
+                                var link = linkElem.GetString();
+                                if (!string.IsNullOrEmpty(link))
+                                    linksList.Add(link);
+                            }
+                            
+                            rawLinksCount = linksList.Count;
+                            var adInfo = fromAdRedirects > 0 ? $" (including {fromAdRedirects} from ads)" : "";
+                            Console.WriteLine($"[Hepsiburada] Page {page}: Found {rawLinksCount} unique product URLs{adInfo}");
+                            
+                            foreach (var url in linksList)
+                            {
+                                if (productLinks.Count >= maxProducts) break;
                                 
-                                // Log the first few to help debug
-                                if (productLinks.Count <= 3)
+                                var cleanUrl = url.Trim();
+                                
+                                if (!productLinks.Contains(cleanUrl))
                                 {
-                                    Console.WriteLine($"[Hepsiburada] Added: {cleanUrl}");
+                                    productLinks.Add(cleanUrl);
+                                    newLinksOnPage++;
+                                    
+                                    if (productLinks.Count <= 5)
+                                    {
+                                        Console.WriteLine($"[Hepsiburada] #{productLinks.Count}: {cleanUrl}");
+                                    }
                                 }
                             }
-                        }
-                        else
-                        {
-                            // Log rejected URLs for first page only
-                            if (page == 1 && newLinksOnPage < 5)
+                            
+                            if (newLinksOnPage != rawLinksCount)
                             {
-                                Console.WriteLine($"[Hepsiburada] Rejected (invalid pattern): {cleanUrl}");
+                                Console.WriteLine($"[Hepsiburada] Skipped {rawLinksCount - newLinksOnPage} duplicates from previous pages");
                             }
                         }
                     }
+                    catch (Exception parseEx)
+                    {
+                        Console.WriteLine($"[Hepsiburada] Error parsing response: {parseEx.Message}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"[Hepsiburada] ⚠ JavaScript returned no data!");
                 }
                 
-                Console.WriteLine($"[Hepsiburada] Page {page}: +{newLinksOnPage} new | Total: {productLinks.Count}/{maxProducts}");
+                Console.WriteLine($"[Hepsiburada] Page {page} Summary: New={newLinksOnPage}, Total={productLinks.Count}/{maxProducts}");
                 Console.Out.Flush();
                 
-                // Send progress update
+                // Progress update
                 if (onProgress != null && productLinks.Count % 10 == 0)
                 {
                     var progressPercent = Math.Min(5 + (int)((productLinks.Count / (double)maxProducts) * 5), 10);
-                    await onProgress(progressPercent, $"?? Found {productLinks.Count}/{maxProducts} products (page {page})", "info");
+                    await onProgress(progressPercent, $"🔍 Found {productLinks.Count}/{maxProducts} products (page {page})", "info");
                 }
                 
                 // Check if we reached target
                 if (productLinks.Count >= maxProducts)
                 {
-                    Console.WriteLine($"[Hepsiburada] ? Target reached!");
-                    Console.Out.Flush();
+                    Console.WriteLine($"[Hepsiburada] ✓ Target reached!");
                     if (onProgress != null)
                     {
-                        await onProgress(10, $"? Found all {productLinks.Count} product URLs!", "success");
+                        await onProgress(10, $"✓ Found all {productLinks.Count} product URLs!", "success");
                     }
                     break;
                 }
                 
-                // Check for pages with no new products (all duplicates)
+                // Check for pages with no new products
                 if (newLinksOnPage == 0)
                 {
                     consecutiveNoNewProducts++;
-                    Console.WriteLine($"[Hepsiburada] ? Page {page} had no new products ({consecutiveNoNewProducts} consecutive)");
+                    Console.WriteLine($"[Hepsiburada] ⚠ Page {page} had no new products ({consecutiveNoNewProducts} consecutive)");
                     
-                    // If page had raw links but all were duplicates, might be end of unique content
                     if (consecutiveNoNewProducts >= 3)
                     {
-                        Console.WriteLine($"[Hepsiburada] ? End of unique products (3 pages with only duplicates)");
-                        Console.Out.Flush();
+                        Console.WriteLine($"[Hepsiburada] ⛔ End of unique products");
                         if (onProgress != null && productLinks.Count > 0)
                         {
-                            await onProgress(10, $"? Found {productLinks.Count} products (all available)", "success");
+                            await onProgress(10, $"✓ Found {productLinks.Count} products (all available)", "success");
                         }
                         break;
                     }
@@ -321,24 +444,22 @@ public class HepsiburadaScraper : IDisposable
                     consecutiveEmptyPages++;
                     if (consecutiveEmptyPages >= 2)
                     {
-                        Console.WriteLine($"[Hepsiburada] ? End of results (empty pages)");
+                        Console.WriteLine($"[Hepsiburada] ⛔ End of results (empty pages)");
                         break;
                     }
                 }
                 
-                previousCount = productLinks.Count;
                 page++;
-                await Task.Delay(700); // Delay between pages to avoid rate limiting
+                await Task.Delay(800); // Delay between pages
             }
             
-            Console.WriteLine($"\n[Hepsiburada] ? Total: {productLinks.Count} products from {page - 1} pages\n");
+            Console.WriteLine($"\n[Hepsiburada] ✓ Total: {productLinks.Count} products from {page - 1} pages\n");
             Console.Out.Flush();
             
-            // Debug: Print first few links
             if (productLinks.Count > 0)
             {
                 Console.WriteLine("Sample product links:");
-                foreach (var link in productLinks.Take(3))
+                foreach (var link in productLinks.Take(5))
                 {
                     Console.WriteLine($"  - {link}");
                 }
@@ -350,7 +471,7 @@ public class HepsiburadaScraper : IDisposable
             Console.WriteLine($"Stack trace: {ex.StackTrace}");
             if (onProgress != null)
             {
-                await onProgress(10, $"? Error finding products: {ex.Message}", "error");
+                await onProgress(10, $"❌ Error finding products: {ex.Message}", "error");
             }
         }
 
@@ -375,6 +496,25 @@ public class HepsiburadaScraper : IDisposable
             {
                 InitializeDriver();
                 _driver!.Navigate().GoToUrl(productUrl);
+                
+                // If this was an adservice URL, wait for redirect
+                if (productUrl.Contains("adservice.hepsiburada.com"))
+                {
+                    var redirectWait = new WebDriverWait(_driver, TimeSpan.FromSeconds(10));
+                    try
+                    {
+                        // Wait for redirect to complete - URL should change to actual product page
+                        redirectWait.Until(d => !d.Url.Contains("adservice.hepsiburada.com"));
+                        Console.WriteLine($"[Hepsiburada] Ad redirect completed to: {_driver.Url}");
+                    }
+                    catch
+                    {
+                        Console.WriteLine($"[Hepsiburada] Warning: Ad redirect timeout, continuing with current page");
+                    }
+                    
+                    // Update productUrl to the actual product URL after redirect
+                    productUrl = _driver.Url.Split('?')[0].Split('#')[0];
+                }
                 
                 var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(8));
                 
@@ -742,8 +882,8 @@ public class HepsiburadaScraper : IDisposable
                             
                             var key = keyDiv.textContent.trim();
                             
-                            // Stop if we hit 'Hatal� i�erik bildir'
-                            if (key.includes('Hatal�') || key.includes('i�erik') || key.includes('bildir')) {
+                            // Stop if we hit 'Hatalı içerik bildir'
+                            if (key.includes('Hatalı') || key.includes('içerik') || key.includes('bildir')) {
                                 console.log('[Hepsiburada JS] Reached end marker at index ' + i);
                                 break;
                             }
@@ -780,7 +920,7 @@ public class HepsiburadaScraper : IDisposable
                                     var key2 = hasKey.textContent.trim();
                                     
                                     // Stop at end marker
-                                    if (key2.includes('Hatal�') || key2.includes('i�erik') || key2.includes('bildir')) {
+                                    if (key2.includes('Hatalı') || key2.includes('içerik') || key2.includes('bildir')) {
                                         console.log('[Hepsiburada JS] Method 2: Reached end marker');
                                         break;
                                     }
@@ -819,8 +959,8 @@ public class HepsiburadaScraper : IDisposable
                                     value = Regex.Replace(value, @"\s+", " ").Trim();
                                     
                                     // Skip if it's the end marker
-                                    if (key.Contains("Hatal�", StringComparison.OrdinalIgnoreCase) ||
-                                        key.Contains("i�erik", StringComparison.OrdinalIgnoreCase) ||
+                                    if (key.Contains("Hatalı", StringComparison.OrdinalIgnoreCase) ||
+                                        key.Contains("içerik", StringComparison.OrdinalIgnoreCase) ||
                                         key.Contains("bildir", StringComparison.OrdinalIgnoreCase))
                                     {
                                         Console.WriteLine($"[Hepsiburada] Skipping end marker: {key}");
@@ -873,8 +1013,8 @@ public class HepsiburadaScraper : IDisposable
                             var key = Regex.Replace(keyDiv.InnerText.Trim(), @"\s+", " ");
                             
                             // Stop at end marker
-                            if (key.Contains("Hatal�", StringComparison.OrdinalIgnoreCase) ||
-                                key.Contains("i�erik", StringComparison.OrdinalIgnoreCase) ||
+                            if (key.Contains("Hatalı", StringComparison.OrdinalIgnoreCase) ||
+                                key.Contains("içerik", StringComparison.OrdinalIgnoreCase) ||
                                 key.Contains("bildir", StringComparison.OrdinalIgnoreCase))
                             {
                                 Console.WriteLine($"[Hepsiburada] HTML: Reached end marker, stopping");
