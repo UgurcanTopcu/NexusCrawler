@@ -508,7 +508,7 @@ public class TrendyolScraper : IDisposable
                             foreach (var url in urls)
                             {
                                 var imgUrl = url.Trim();
-                                
+
                                 // Normalize URL
                                 if (imgUrl.StartsWith("//")) 
                                     imgUrl = "https:" + imgUrl;
@@ -534,6 +534,13 @@ public class TrendyolScraper : IDisposable
                                     imgUrl.Contains("static/", StringComparison.OrdinalIgnoreCase))
                                 {
                                     Console.WriteLine($"[Trendyol] SKIPPED non-product: {imgUrl.Substring(0, Math.Min(60, imgUrl.Length))}...");
+                                    continue;
+                                }
+                                
+                                // Skip placeholder images
+                                if (imgUrl.Contains("placeholder", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Console.WriteLine($"[Trendyol] SKIPPED placeholder: {imgUrl}");
                                     continue;
                                 }
                                 
@@ -585,6 +592,10 @@ public class TrendyolScraper : IDisposable
                                 imgUrl.Contains("badge") ||
                                 imgUrl.Contains("/ty/") ||
                                 imgUrl.Contains("static/"))
+                                continue;
+                            
+                            // Skip placeholder images
+                            if (imgUrl.Contains("placeholder", StringComparison.OrdinalIgnoreCase))
                                 continue;
                             
                             if (imgUrl.StartsWith("//")) imgUrl = "https:" + imgUrl;

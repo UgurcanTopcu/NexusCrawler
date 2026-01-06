@@ -533,10 +533,17 @@ public class HepsiburadaScraper : IDisposable
                             
                             document.querySelectorAll('#pdp-carouselContainer picture source, #pdp-carouselContainer picture img').forEach(function(el) {
                                 var src = el.srcset || el.src || '';
-                                src = src.split(' ')[0].split(',')[0].trim();
-                                if (src && src.includes('productimages.hepsiburada.net') && !seen[src]) {
-                                    seen[src] = true;
-                                    images.push(src);
+
+                                // For WebP images, take the 1000x1000 variant if available
+                                if (src.includes('/s/') && src.includes('/format:webp')) {
+                                    var webpSrc = src.replace(/\/s\/\\d+\\/[^/]+\\-([^/]+)\\.(webp)/, '/s/1000-1000/$1.$2');
+                                    images.push(webpSrc);
+                                } else {
+                                    src = src.split(' ')[0].split(',')[0].trim();
+                                    if (src && src.includes('productimages.hepsiburada.net') && !seen[src]) {
+                                        seen[src] = true;
+                                        images.push(src);
+                                    }
                                 }
                             });
                             
@@ -691,15 +698,20 @@ public class HepsiburadaScraper : IDisposable
     {
         try
         {
-            // Trigger lazy loading if using Selenium
+            Console.WriteLine($"[Hepsiburada] Extracting attributes for: {product.Name}");
+            
+            // Method 1: JavaScript extraction for Selenium (most reliable for dynamic content)
             if (Method == ScrapeMethod.Selenium && _driver != null)
             {
                 try
                 {
                     var jsExecutor = (IJavaScriptExecutor)_driver;
+                    
+                    // Scroll to trigger lazy loading of product details section
                     jsExecutor.ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
                     await Task.Delay(700);
                     
+                    // Force display of lazy-loaded sections
                     jsExecutor.ExecuteScript(@"
                         document.querySelectorAll('section[data-hydration-on-demand]').forEach(function(section) {
                             section.style.display = 'block';
@@ -709,44 +721,233 @@ public class HepsiburadaScraper : IDisposable
                     
                     await Task.Delay(1000);
                     
+                    // Extract attributes using multiple methods
+                    var jsData = jsExecutor.ExecuteScript(@"
+                        var attrs = [];
+                        
+                        console.log('[Hepsiburada JS] Starting attribute extraction...');
+                        
+                        // METHOD 1: Target the specific container divs with partial class matching
+                        // Look for divs that contain 'jkj4C4LML4qv2Iq8GkL3' in their class
+                        var attributeContainers = document.querySelectorAll('div[class*=""jkj4C4LML4qv2Iq8GkL3""]');
+                        
+                        console.log('[Hepsiburada JS] Method 1: Found ' + attributeContainers.length + ' containers with jkj4C4LML4qv2Iq8GkL3');
+                        
+                        for (var i = 0; i < attributeContainers.length; i++) {
+                            var container = attributeContainers[i];
+                            
+                            // Get the key (attribute name) - look for div with OXP5AzPvafgN_i3y6wGp
+                            var keyDiv = container.querySelector('div[class*=""OXP5AzPvafgN_i3y6wGp""]');
+                            if (!keyDiv) continue;
+                            
+                            var key = keyDiv.textContent.trim();
+                            
+                            // Stop if we hit 'Hatalý içerik bildir'
+                            if (key.includes('Hatalý') || key.includes('içerik') || key.includes('bildir')) {
+                                console.log('[Hepsiburada JS] Reached end marker at index ' + i);
+                                break;
+                            }
+                            
+                            // Get the value - look for div with AxM3TmSghcDRH1F871Vh
+                            var valueDiv = container.querySelector('div[class*=""AxM3TmSghcDRH1F871Vh""]');
+                            if (!valueDiv) continue;
+                            
+                            var valueSpan = valueDiv.querySelector('span');
+                            var value = valueSpan ? valueSpan.textContent.trim() : valueDiv.textContent.trim();
+                            
+                            if (key && value && key.length > 0 && value.length > 0) {
+                                console.log('[Hepsiburada JS] Extracted: ' + key + ' = ' + value);
+                                attrs.push({ key: key, value: value });
+                            }
+                        }
+                        
+                        // METHOD 2: If nothing found, try finding all divs with both key and value patterns
+                        if (attrs.length === 0) {
+                            console.log('[Hepsiburada JS] Method 2: Trying alternative selector...');
+                            
+                            // Find all divs that might be attribute rows
+                            var allDivs = document.querySelectorAll('div');
+                            var possibleContainers = [];
+                            
+                            for (var j = 0; j < allDivs.length; j++) {
+                                var div = allDivs[j];
+                                
+                                // Check if this div has a child with key-like class
+                                var hasKey = div.querySelector('div[class*=""OXP5AzPvafgN""]');
+                                var hasValue = div.querySelector('div[class*=""AxM3TmSghcDRH1F871Vh""]');
+                                
+                                if (hasKey && hasValue) {
+                                    var key2 = hasKey.textContent.trim();
+                                    
+                                    // Stop at end marker
+                                    if (key2.includes('Hatalý') || key2.includes('içerik') || key2.includes('bildir')) {
+                                        console.log('[Hepsiburada JS] Method 2: Reached end marker');
+                                        break;
+                                    }
+                                    
+                                    var valueSpan2 = hasValue.querySelector('span');
+                                    var value2 = valueSpan2 ? valueSpan2.textContent.trim() : hasValue.textContent.trim();
+                                    
+                                    if (key2 && value2 && key2.length > 0 && value2.length > 0) {
+                                        console.log('[Hepsiburada JS] Method 2 extracted: ' + key2 + ' = ' + value2);
+                                        attrs.push({ key: key2, value: value2 });
+                                    }
+                                }
+                            }
+                        }
+                        
+                        console.log('[Hepsiburada JS] Total attributes extracted: ' + attrs.length);
+                        return JSON.stringify(attrs);
+                    ");
+                    
+                    if (jsData != null && !string.IsNullOrWhiteSpace(jsData.ToString()))
+                    {
+                        using var doc = JsonDocument.Parse(jsData.ToString()!);
+                        int jsCount = 0;
+                        foreach (var attr in doc.RootElement.EnumerateArray())
+                        {
+                            if (attr.TryGetProperty("key", out var keyElem) && 
+                                attr.TryGetProperty("value", out var valueElem))
+                            {
+                                var key = keyElem.GetString();
+                                var value = valueElem.GetString();
+                                
+                                if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(value))
+                                {
+                                    // Clean up whitespace
+                                    key = Regex.Replace(key, @"\s+", " ").Trim();
+                                    value = Regex.Replace(value, @"\s+", " ").Trim();
+                                    
+                                    // Skip if it's the end marker
+                                    if (key.Contains("Hatalý", StringComparison.OrdinalIgnoreCase) ||
+                                        key.Contains("içerik", StringComparison.OrdinalIgnoreCase) ||
+                                        key.Contains("bildir", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        Console.WriteLine($"[Hepsiburada] Skipping end marker: {key}");
+                                        break;
+                                    }
+                                    
+                                    if (!product.Attributes.ContainsKey(key))
+                                    {
+                                        product.Attributes[key] = value;
+                                        jsCount++;
+                                        Console.WriteLine($"[Hepsiburada] Added attribute: {key} = {value}");
+                                    }
+                                }
+                            }
+                        }
+                        Console.WriteLine($"[Hepsiburada] JS extracted {jsCount} attributes");
+                    }
+                    
+                    // Get updated HTML after lazy loading
                     var updatedHtml = _driver.PageSource;
                     htmlDoc = new HtmlDocument();
                     htmlDoc.LoadHtml(updatedHtml);
                 }
-                catch { }
-            }
-            
-            // Try table selectors
-            var attributeRows = htmlDoc.DocumentNode.SelectNodes("//table//tr[.//td[2]]");
-            
-            if (attributeRows != null && attributeRows.Count > 0)
-            {
-                foreach (var row in attributeRows)
+                catch (Exception jsEx)
                 {
-                    try
-                    {
-                        var cells = row.SelectNodes(".//td");
-                        if (cells != null && cells.Count >= 2)
-                        {
-                            var key = Regex.Replace(cells[0].InnerText.Trim(), @"\s+", " ");
-                            var value = Regex.Replace(cells[1].InnerText.Trim(), @"\s+", " ");
-                            
-                            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
-                            {
-                                product.Attributes[key] = value;
-                            }
-                        }
-                    }
-                    catch { }
+                    Console.WriteLine($"[Hepsiburada] JS attribute extraction warning: {jsEx.Message}");
                 }
             }
             
-            // Try definition lists if tables didn't work
+            // Method 2: HTML parsing with specific Hepsiburada classes
             if (product.Attributes.Count == 0)
             {
+                Console.WriteLine("[Hepsiburada] Trying HTML parsing with specific classes...");
+                
+                // Try with partial class matching using contains
+                var attributeContainers = htmlDoc.DocumentNode.SelectNodes("//div[contains(@class, 'jkj4C4LML4qv2Iq8GkL3')]");
+                
+                if (attributeContainers != null && attributeContainers.Count > 0)
+                {
+                    Console.WriteLine($"[Hepsiburada] Found {attributeContainers.Count} containers in HTML");
+                    int htmlCount = 0;
+                    foreach (var container in attributeContainers)
+                    {
+                        try
+                        {
+                            // Get key from div with class containing OXP5AzPvafgN_i3y6wGp
+                            var keyDiv = container.SelectSingleNode(".//div[contains(@class, 'OXP5AzPvafgN_i3y6wGp')]");
+                            if (keyDiv == null) continue;
+                            
+                            var key = Regex.Replace(keyDiv.InnerText.Trim(), @"\s+", " ");
+                            
+                            // Stop at end marker
+                            if (key.Contains("Hatalý", StringComparison.OrdinalIgnoreCase) ||
+                                key.Contains("içerik", StringComparison.OrdinalIgnoreCase) ||
+                                key.Contains("bildir", StringComparison.OrdinalIgnoreCase))
+                            {
+                                Console.WriteLine($"[Hepsiburada] HTML: Reached end marker, stopping");
+                                break;
+                            }
+                            
+                            // Get value from div with class containing AxM3TmSghcDRH1F871Vh
+                            var valueDiv = container.SelectSingleNode(".//div[contains(@class, 'AxM3TmSghcDRH1F871Vh')]");
+                            if (valueDiv == null) continue;
+                            
+                            // Try to get span first, fallback to div text
+                            var valueSpan = valueDiv.SelectSingleNode(".//span");
+                            var value = valueSpan != null 
+                                ? Regex.Replace(valueSpan.InnerText.Trim(), @"\s+", " ")
+                                : Regex.Replace(valueDiv.InnerText.Trim(), @"\s+", " ");
+                            
+                            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value) && !product.Attributes.ContainsKey(key))
+                            {
+                                product.Attributes[key] = value;
+                                htmlCount++;
+                                Console.WriteLine($"[Hepsiburada] HTML added: {key} = {value}");
+                            }
+                        }
+                        catch { }
+                    }
+                    Console.WriteLine($"[Hepsiburada] HTML parsing extracted {htmlCount} attributes");
+                }
+                else
+                {
+                    Console.WriteLine("[Hepsiburada] No attribute containers found in HTML");
+                }
+            }
+            
+            // Method 3: Fallback to table parsing (old structure)
+            if (product.Attributes.Count == 0)
+            {
+                Console.WriteLine("[Hepsiburada] Trying table parsing (fallback)...");
+                var attributeRows = htmlDoc.DocumentNode.SelectNodes("//table//tr[.//td[2]]");
+                
+                if (attributeRows != null && attributeRows.Count > 0)
+                {
+                    int tableCount = 0;
+                    foreach (var row in attributeRows)
+                    {
+                        try
+                        {
+                            var cells = row.SelectNodes(".//td");
+                            if (cells != null && cells.Count >= 2)
+                            {
+                                var key = Regex.Replace(cells[0].InnerText.Trim(), @"\s+", " ");
+                                var value = Regex.Replace(cells[1].InnerText.Trim(), @"\s+", " ");
+                                
+                                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value) && !product.Attributes.ContainsKey(key))
+                                {
+                                    product.Attributes[key] = value;
+                                    tableCount++;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                    Console.WriteLine($"[Hepsiburada] Table extracted {tableCount} attributes");
+                }
+            }
+            
+            // Method 4: Parse definition lists (another fallback)
+            if (product.Attributes.Count == 0)
+            {
+                Console.WriteLine("[Hepsiburada] Trying definition list parsing (fallback)...");
                 var dtElements = htmlDoc.DocumentNode.SelectNodes("//dt");
                 if (dtElements != null)
                 {
+                    int dtCount = 0;
                     foreach (var dt in dtElements)
                     {
                         try
@@ -760,18 +961,33 @@ public class HepsiburadaScraper : IDisposable
                                 var key = Regex.Replace(dt.InnerText.Trim(), @"\s+", " ");
                                 var value = Regex.Replace(dd.InnerText.Trim(), @"\s+", " ");
                                 
-                                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value) && !product.Attributes.ContainsKey(key))
                                 {
                                     product.Attributes[key] = value;
+                                    dtCount++;
                                 }
                             }
                         }
                         catch { }
                     }
+                    Console.WriteLine($"[Hepsiburada] Definition list extracted {dtCount} attributes");
                 }
             }
+            
+            Console.WriteLine($"[Hepsiburada] Total attributes extracted: {product.Attributes.Count}");
+            if (product.Attributes.Count > 0)
+            {
+                Console.WriteLine($"[Hepsiburada] Sample attributes: {string.Join(", ", product.Attributes.Keys.Take(5))}");
+            }
+            else
+            {
+                Console.WriteLine($"[Hepsiburada] ? WARNING: No attributes found for product!");
+            }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Hepsiburada] Attribute extraction error: {ex.Message}");
+        }
         
         await Task.CompletedTask;
     }
