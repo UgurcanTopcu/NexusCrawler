@@ -1,4 +1,4 @@
-using Scrapper.Models;
+﻿using Scrapper.Models;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -14,7 +14,7 @@ public class BulkImageProcessingService
 {
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _sessions = new();
     private const int TargetSize = 1000;
-    
+
     public static void StopSession(string sessionId)
     {
         if (_sessions.TryRemove(sessionId, out var cts))
@@ -38,10 +38,10 @@ public class BulkImageProcessingService
         var cancellationToken = cts.Token;
 
         HttpClient? httpClient = null;
-        
+
         try
         {
-            await onProgress(1, "?? Reading Excel file...", "info");
+            await onProgress(1, "📖 Reading Excel file...", "info");
 
             // Step 1: Read Excel
             var reader = new BulkImageExcelReader();
@@ -49,31 +49,39 @@ public class BulkImageProcessingService
 
             if (excelData.ImageCells.Count == 0)
             {
-                await onProgress(100, "?? No image URLs found in the Excel file", "warning");
+                await onProgress(100, "⚠️ No image URLs found in the Excel file", "warning");
                 await SendComplete(onProgress, null, 0, 0);
                 return;
             }
 
-            await onProgress(5, $"? Found {excelData.ImageCells.Count} images across {excelData.ImageColumns.Count} columns", "success");
-            
+            await onProgress(5, $"✅ Found {excelData.ImageCells.Count} images across {excelData.ImageColumns.Count} columns", "success");
+
             // Log which columns will be processed
             var imageColList = string.Join(", ", excelData.ImageColumns.OrderBy(x => x));
             var dataColList = excelData.DataColumns.Except(excelData.ImageColumns).OrderBy(x => x).ToList();
-            await onProgress(6, $"?? Image columns: {imageColList} | Data columns (preserved): {(dataColList.Any() ? string.Join(", ", dataColList) : "None")}", "info");
+            await onProgress(6, $"📊 Image columns: {imageColList} | Data columns (preserved): {(dataColList.Any() ? string.Join(", ", dataColList) : "None")}", "info");
 
             // Step 2: Initialize services
-            await onProgress(7, "?? Initializing CDN connection...", "info");
-            
+            await onProgress(7, "🔌 Initializing CDN connection...", "info");
+
             var ftpConfig = new CdnFtpConfig();
             var ftpService = new FtpUploadService(ftpConfig);
             httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
             httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
 
+            // Test FTP connection first
+            Console.WriteLine("[BulkImage] Testing FTP connection...");
+            await onProgress(8, "🔍 Testing FTP connection...", "info");
+
+            // Create a unique session folder for this batch
+            var sessionFolder = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            Console.WriteLine($"[BulkImage] Session folder: {sessionFolder}");
+
             // Step 3: Process each image
             var progressPerImage = 85.0 / excelData.ImageCells.Count;
             var currentProgress = 10.0;
-            
+
             int successCount = 0;
             int failCount = 0;
             int imageIndex = 0;
@@ -82,12 +90,12 @@ public class BulkImageProcessingService
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    await onProgress((int)currentProgress, "?? Processing stopped by user", "warning");
+                    await onProgress((int)currentProgress, "⏹️ Processing stopped by user", "warning");
                     break;
                 }
 
                 imageIndex++;
-                await onProgress((int)currentProgress, $"??? Processing image {imageIndex}/{excelData.ImageCells.Count} (Row {imageCell.Row}, Col {imageCell.Column})...", "info");
+                await onProgress((int)currentProgress, $"⚙️ Processing image {imageIndex}/{excelData.ImageCells.Count} (Row {imageCell.Row}, Col {imageCell.Column})...", "info");
 
                 try
                 {
@@ -95,19 +103,19 @@ public class BulkImageProcessingService
                     Console.WriteLine($"[BulkImage] === Processing Image {imageIndex}/{excelData.ImageCells.Count} ===");
                     Console.WriteLine($"[BulkImage] Row: {imageCell.Row}, Column: {imageCell.Column}");
                     Console.WriteLine($"[BulkImage] URL: {imageCell.OriginalUrl}");
-                    
+
                     var imageData = await DownloadImageAsync(httpClient, imageCell.OriginalUrl);
                     if (imageData == null)
                     {
                         imageCell.Error = "Download failed - Check console for details";
                         imageCell.IsProcessed = true;
                         failCount++;
-                        await onProgress((int)currentProgress, $"? Download failed: Row {imageCell.Row}, Col {imageCell.Column} - Check URL", "error");
+                        await onProgress((int)currentProgress, $"❌ Download failed: Row {imageCell.Row}, Col {imageCell.Column}", "error");
                         currentProgress += progressPerImage;
                         continue;
                     }
 
-                    Console.WriteLine($"[BulkImage] ? Image downloaded, now resizing...");
+                    Console.WriteLine($"[BulkImage] ✓ Image downloaded ({imageData.Length} bytes), now resizing...");
 
                     // Resize
                     var resizedData = await ResizeImageAsync(imageData);
@@ -116,23 +124,22 @@ public class BulkImageProcessingService
                         imageCell.Error = "Resize failed - Invalid image format";
                         imageCell.IsProcessed = true;
                         failCount++;
-                        await onProgress((int)currentProgress, $"? Resize failed: Row {imageCell.Row}, Col {imageCell.Column}", "error");
+                        await onProgress((int)currentProgress, $"❌ Resize failed: Row {imageCell.Row}, Col {imageCell.Column}", "error");
                         currentProgress += progressPerImage;
                         continue;
                     }
 
-                    Console.WriteLine($"[BulkImage] ? Image resized, now uploading to CDN...");
+                    Console.WriteLine($"[BulkImage] ✓ Image resized ({resizedData.Length} bytes), now uploading to CDN...");
 
-                    // Upload to CDN
-                    // Use a unique folder: bulk_upload/timestamp/
-                    var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                    var fileName = $"image_{imageCell.Row}_{imageCell.Column}.jpg";
-                    
+                    // Upload to CDN with proper folder structure
+                    var fileName = $"img_{imageCell.Row}_{imageCell.Column}_{Guid.NewGuid():N}.jpg";
+
+                    // FIXED: Use proper parameters - site=bulk_upload, productId=sessionFolder
                     var cdnUrl = await ftpService.UploadImageAsync(
                         resizedData,
                         fileName,
-                        "bulk_upload",
-                        timestamp
+                        site: "bulk_upload",      // Site folder
+                        productId: sessionFolder  // Session timestamp folder
                     );
 
                     if (!string.IsNullOrEmpty(cdnUrl))
@@ -140,46 +147,46 @@ public class BulkImageProcessingService
                         imageCell.CdnUrl = cdnUrl;
                         imageCell.IsProcessed = true;
                         successCount++;
-                        
+
                         // Update the cell value in the data
                         if (imageCell.Row <= excelData.AllCells.Count && imageCell.Column <= excelData.AllCells[imageCell.Row - 1].Count)
                         {
                             excelData.AllCells[imageCell.Row - 1][imageCell.Column - 1] = cdnUrl;
                         }
-                        
-                        Console.WriteLine($"[BulkImage] ? Upload successful! CDN URL: {cdnUrl}");
-                        await onProgress((int)currentProgress, $"? Row {imageCell.Row}, Col {imageCell.Column}: Uploaded successfully", "success");
+
+                        Console.WriteLine($"[BulkImage] ✅ Upload successful! CDN URL: {cdnUrl}");
+                        await onProgress((int)currentProgress, $"✅ Row {imageCell.Row}, Col {imageCell.Column}: Uploaded", "success");
                     }
                     else
                     {
-                        imageCell.Error = "Upload failed - FTP error";
+                        imageCell.Error = "Upload failed - FTP error (check console logs)";
                         imageCell.IsProcessed = true;
                         failCount++;
-                        Console.WriteLine($"[BulkImage] ? Upload failed to FTP");
-                        await onProgress((int)currentProgress, $"? Upload failed: Row {imageCell.Row}, Col {imageCell.Column}", "error");
+                        Console.WriteLine($"[BulkImage] ❌ Upload failed to FTP");
+                        await onProgress((int)currentProgress, $"❌ Upload failed: Row {imageCell.Row}, Col {imageCell.Column}", "error");
                     }
                 }
                 catch (Exception ex)
                 {
-                    imageCell.Error = ex.Message;
+                    imageCell.Error = $"{ex.GetType().Name}: {ex.Message}";
                     imageCell.IsProcessed = true;
                     failCount++;
                     Console.WriteLine($"[BulkImage] EXCEPTION at Row {imageCell.Row}, Col {imageCell.Column}");
                     Console.WriteLine($"[BulkImage] Exception: {ex.GetType().Name} - {ex.Message}");
                     Console.WriteLine($"[BulkImage] Stack: {ex.StackTrace}");
-                    await onProgress((int)currentProgress, $"? Error at Row {imageCell.Row}, Col {imageCell.Column}: {ex.Message}", "error");
+                    await onProgress((int)currentProgress, $"❌ Error at Row {imageCell.Row}, Col {imageCell.Column}: {ex.Message}", "error");
                 }
 
                 currentProgress += progressPerImage;
-                
-                // Small delay between uploads
-                await Task.Delay(100);
+
+                // Small delay between uploads to avoid overwhelming the server
+                await Task.Delay(200);
             }
 
             // Step 4: Export results
-            await onProgress(95, "?? Creating result Excel with all columns preserved...", "info");
+            await onProgress(95, "📊 Creating result Excel with all columns preserved...", "info");
 
-            var resultFileName = $"BulkImages_Processed_{DateTime.Now:yyyyMMdd_HHmms}.xlsx";
+            var resultFileName = $"BulkImages_Processed_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
             var resultFilePath = Path.Combine(Directory.GetCurrentDirectory(), resultFileName);
 
             try
@@ -187,19 +194,27 @@ public class BulkImageProcessingService
                 var exporter = new BulkImageExcelExporter();
                 exporter.Export(excelData, resultFilePath);
 
-                await onProgress(100, $"? Done! {successCount} uploaded, {failCount} failed | All non-image columns preserved", "success");
+                var summary = $"✅ Done! {successCount} uploaded, {failCount} failed";
+                if (dataColList.Any())
+                {
+                    summary += $" | {dataColList.Count} data column(s) preserved";
+                }
+
+                await onProgress(100, summary, "success");
                 await SendComplete(onProgress, resultFileName, successCount, failCount);
             }
             catch (Exception ex)
             {
-                await onProgress(100, $"? Error creating Excel: {ex.Message}", "error");
+                Console.WriteLine($"[BulkImage] Excel export error: {ex.Message}");
+                await onProgress(100, $"❌ Error creating Excel: {ex.Message}", "error");
                 await SendComplete(onProgress, null, successCount, failCount);
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[BulkImage] Error: {ex.Message}");
-            await onProgress(100, $"? Error: {ex.Message}", "error");
+            Console.WriteLine($"[BulkImage] Fatal error: {ex.Message}");
+            Console.WriteLine($"[BulkImage] Stack: {ex.StackTrace}");
+            await onProgress(100, $"❌ Error: {ex.Message}", "error");
             await SendComplete(onProgress, null, 0, 0);
         }
         finally
@@ -216,7 +231,7 @@ public class BulkImageProcessingService
     private async Task<byte[]?> DownloadImageAsync(HttpClient httpClient, string imageUrl)
     {
         int maxRetries = 3;
-        
+
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
             try
@@ -227,7 +242,7 @@ public class BulkImageProcessingService
                     Console.WriteLine($"[BulkImage] ERROR: Image URL is empty or whitespace");
                     return null;
                 }
-                
+
                 if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri))
                 {
                     Console.WriteLine($"[BulkImage] ERROR: Invalid URL format: {imageUrl}");
@@ -237,15 +252,15 @@ public class BulkImageProcessingService
                 Console.WriteLine($"[BulkImage] Downloading (attempt {attempt}/{maxRetries}): {imageUrl.Substring(0, Math.Min(80, imageUrl.Length))}...");
 
                 var response = await httpClient.GetAsync(imageUrl);
-                
+
                 if (!response.IsSuccessStatusCode)
                 {
                     var statusCode = (int)response.StatusCode;
                     var reasonPhrase = response.ReasonPhrase;
-                    
+
                     Console.WriteLine($"[BulkImage] HTTP Error (attempt {attempt}/{maxRetries}): Status {statusCode} ({reasonPhrase})");
                     Console.WriteLine($"[BulkImage] URL: {imageUrl}");
-                    
+
                     // Retry on server errors (5xx) or rate limiting (429)
                     if (attempt < maxRetries && (statusCode >= 500 || statusCode == 429))
                     {
@@ -254,12 +269,12 @@ public class BulkImageProcessingService
                         await Task.Delay(delayMs);
                         continue;
                     }
-                    
+
                     return null;
                 }
 
                 var imageData = await response.Content.ReadAsByteArrayAsync();
-                
+
                 if (imageData == null || imageData.Length == 0)
                 {
                     Console.WriteLine($"[BulkImage] ERROR: Downloaded empty data from: {imageUrl}");
@@ -269,20 +284,19 @@ public class BulkImageProcessingService
                 if (imageData.Length < 1024)
                 {
                     Console.WriteLine($"[BulkImage] WARNING: Image very small ({imageData.Length} bytes), might be invalid: {imageUrl}");
-                    // Still try to process it, might be a valid tiny image
                 }
 
-                Console.WriteLine($"[BulkImage] ? Downloaded successfully: {imageData.Length} bytes");
+                Console.WriteLine($"[BulkImage] ✓ Downloaded successfully: {imageData.Length} bytes");
                 return imageData;
             }
             catch (TaskCanceledException ex)
             {
                 Console.WriteLine($"[BulkImage] TIMEOUT (attempt {attempt}/{maxRetries}): {imageUrl}");
                 Console.WriteLine($"[BulkImage] Error: {ex.Message}");
-                
+
                 if (attempt < maxRetries)
                 {
-                    await Task.Delay(2000); // Wait 2s before retry on timeout
+                    await Task.Delay(2000);
                     continue;
                 }
                 return null;
@@ -292,7 +306,7 @@ public class BulkImageProcessingService
                 Console.WriteLine($"[BulkImage] HTTP Exception (attempt {attempt}/{maxRetries}): {imageUrl}");
                 Console.WriteLine($"[BulkImage] Error: {ex.Message}");
                 Console.WriteLine($"[BulkImage] Inner Exception: {ex.InnerException?.Message ?? "None"}");
-                
+
                 if (attempt < maxRetries)
                 {
                     await Task.Delay(1000 * attempt);
@@ -328,7 +342,7 @@ public class BulkImageProcessingService
 
             using var inputStream = new MemoryStream(imageData);
             Image? image = null;
-            
+
             try
             {
                 image = await Image.LoadAsync(inputStream);
@@ -365,10 +379,10 @@ public class BulkImageProcessingService
 
                 using var outputStream = new MemoryStream();
                 await image.SaveAsJpegAsync(outputStream, new JpegEncoder { Quality = 90 });
-                
+
                 var resizedData = outputStream.ToArray();
-                Console.WriteLine($"[BulkImage] ? Resize complete: {resizedData.Length} bytes");
-                
+                Console.WriteLine($"[BulkImage] ✓ Resize complete: {resizedData.Length} bytes");
+
                 return resizedData;
             }
         }

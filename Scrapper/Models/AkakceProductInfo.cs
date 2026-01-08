@@ -61,6 +61,16 @@ public class AkakceProductInfo
     public List<AkakceSellerInfo> Sellers { get; set; } = new();
     
     /// <summary>
+    /// Product variants (different storage, color, etc. combinations)
+    /// </summary>
+    public List<AkakceProductVariant> Variants { get; set; } = new();
+    
+    /// <summary>
+    /// Whether this product has variants
+    /// </summary>
+    public bool HasVariants => Variants.Count > 0;
+    
+    /// <summary>
     /// Product specifications/attributes
     /// </summary>
     public Dictionary<string, string> Specifications { get; set; } = new();

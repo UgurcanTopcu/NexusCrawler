@@ -260,9 +260,21 @@ app.MapGet("/", () => Results.Content("""
         .example { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; font-size: 0.9em; }
         .example strong { color: #667eea; }
         
-        .checkbox-label { display: flex; align-items: center; margin-bottom: 10px; }
-        .checkbox-label input { width: auto; margin-right: 8px; }
-        .checkbox-label label { margin: 0; }
+        .checkbox-label { 
+            display: flex; 
+            align-items: center; 
+            margin-bottom: 10px; 
+        }
+        .checkbox-label input { 
+            width: auto; 
+            margin-right: 8px; 
+            cursor: pointer;
+        }
+        .checkbox-label label { 
+            margin: 0; 
+            cursor: pointer;
+            font-weight: normal;
+        }
     </style>
 </head>
 <body>
@@ -726,6 +738,22 @@ app.MapGet("/akakce", () => Results.Content("""
         }
         
         .example strong { color: #f5576c; }
+        
+        .checkbox-label { 
+            display: flex; 
+            align-items: center; 
+            margin-bottom: 10px; 
+        }
+        .checkbox-label input { 
+            width: auto; 
+            margin-right: 8px; 
+            cursor: pointer;
+        }
+        .checkbox-label label { 
+            margin: 0; 
+            cursor: pointer;
+            font-weight: normal;
+        }
     </style>
 </head>
 <body>
@@ -777,6 +805,14 @@ app.MapGet("/akakce", () => Results.Content("""
                     <div class="input-hint">Start scraping from this product number</div>
                 </div>
                 
+                <div class="form-group">
+                    <div class="checkbox-label">
+                        <input type="checkbox" id="scanVariants" name="scanVariants">
+                        <label for="scanVariants">Scan All Product Variants (Storage, Color, etc.)</label>
+                    </div>
+                    <div class="input-hint">⚠️ Increases scraping time significantly (e.g., 15 variants = 15x longer)</div>
+                </div>
+                
                 <div class="example">
                     <strong>Example Category URLs:</strong><br>
                     • Laptops: https://www.akakce.com/laptop-notebook.html<br>
@@ -799,6 +835,14 @@ app.MapGet("/akakce", () => Results.Content("""
                         <div class="filename" id="fileName"></div>
                     </div>
                     <div class="input-hint">Excel should have Akakce product URLs in the first column</div>
+                </div>
+                
+                <div class="form-group">
+                    <div class="checkbox-label">
+                        <input type="checkbox" id="scanVariantsFile" name="scanVariantsFile">
+                        <label for="scanVariantsFile">Scan All Product Variants (Storage, Color, etc.)</label>
+                    </div>
+                    <div class="input-hint">⚠️ Increases scraping time significantly (e.g., 15 variants = 15x longer)</div>
                 </div>
                 
                 <div class="example">
@@ -929,6 +973,7 @@ app.MapGet("/akakce", () => Results.Content("""
                     const categoryUrl = document.getElementById('categoryUrl').value;
                     const maxProducts = document.getElementById('maxProducts').value;
                     const startFrom = document.getElementById('startFrom').value;
+                    const scanVariants = document.getElementById('scanVariants').checked;
                     
                     response = await fetch('/api/akakce/scrape-category', {
                         method: 'POST',
@@ -937,7 +982,8 @@ app.MapGet("/akakce", () => Results.Content("""
                             categoryUrl: categoryUrl,
                             maxProducts: parseInt(maxProducts),
                             sessionId: sessionId,
-                            startFrom: parseInt(startFrom)
+                            startFrom: parseInt(startFrom),
+                            scanVariants: scanVariants
                         }),
                         signal: abortController.signal
                     });
@@ -945,10 +991,13 @@ app.MapGet("/akakce", () => Results.Content("""
                     // File upload mode
                     if (!selectedFile) return;
                     
+                    const scanVariants = document.getElementById('scanVariantsFile').checked;
+                    
                     const formData = new FormData();
                     formData.append('file', selectedFile);
                     formData.append('scrapeMethod', 'Selenium');
                     formData.append('sessionId', sessionId);
+                    formData.append('scanVariants', scanVariants.toString());
                     
                     response = await fetch('/api/akakce/scrape', {
                         method: 'POST',
@@ -1532,7 +1581,8 @@ app.MapPost("/api/akakce/scrape-category", async (AkakceCategoryRequest request,
                     await writer.FlushAsync();
                 },
                 request.SessionId,
-                request.StartFrom
+                request.StartFrom,
+                request.ScanVariants
             );
         }
         catch (Exception ex)
@@ -1564,6 +1614,7 @@ app.MapPost("/api/akakce/scrape", async (HttpRequest request, AkakceScraperServi
             var file = form.Files.GetFile("file");
             var scrapeMethodStr = form["scrapeMethod"].ToString();
             var sessionId = form["sessionId"].ToString();
+            var scanVariantsStr = form["scanVariants"].ToString();
             
             if (file == null || file.Length == 0)
             {
@@ -1584,6 +1635,9 @@ app.MapPost("/api/akakce/scrape", async (HttpRequest request, AkakceScraperServi
                 ? Scrapper.Models.ScrapeMethod.ScrapeDo 
                 : Scrapper.Models.ScrapeMethod.Selenium;
             
+            // Parse scan variants
+            bool scanVariants = bool.TryParse(scanVariantsStr, out var sv) && sv;
+            
             // Process the file
             using var memoryStream = new MemoryStream();
             await file.CopyToAsync(memoryStream);
@@ -1603,7 +1657,9 @@ app.MapPost("/api/akakce/scrape", async (HttpRequest request, AkakceScraperServi
                     await writer.WriteLineAsync($"data: {data}\n");
                     await writer.FlushAsync();
                 },
-                sessionId
+                sessionId,
+                1, // startFrom default
+                scanVariants
             );
         }
         catch (Exception ex)
@@ -1727,6 +1783,7 @@ public record AkakceCategoryRequest(
     string CategoryUrl,
     int MaxProducts,
     string? SessionId,
-    int StartFrom = 1
+    int StartFrom = 1,
+    bool ScanVariants = false
 );
 

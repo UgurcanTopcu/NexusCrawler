@@ -21,10 +21,16 @@ public class AkakceScraper : IDisposable
     private static readonly string UserDataDir = Path.Combine(Path.GetTempPath(), "AkakceEdgeProfile");
     private static readonly Random _random = new Random();
     private int _productsScrapedSinceLastChallenge = 0;
+    private bool _cloudflareDetected = false;
     
     // Minimum delay between product page loads (in seconds)
-    private const int MIN_DELAY_BETWEEN_PRODUCTS = 5;
-    private const int MAX_DELAY_BETWEEN_PRODUCTS = 10;
+    // Reduced from 5-10 to 2-4 for faster scraping when no Cloudflare
+    private const int MIN_DELAY_BETWEEN_PRODUCTS = 2;
+    private const int MAX_DELAY_BETWEEN_PRODUCTS = 4;
+    
+    // Cloudflare mode delays (only used when Cloudflare is detected)
+    private const int MIN_DELAY_CLOUDFLARE = 5;
+    private const int MAX_DELAY_CLOUDFLARE = 8;
     
     // User agent rotation list - realistic Edge versions
     private static readonly string[] UserAgents = new[]
@@ -370,32 +376,39 @@ public class AkakceScraper : IDisposable
             }
             
             // Try using Selenium to find and click
-            try
+            for (int retry = 0; retry < 2; retry++)
             {
-                // Look for the checkbox label or container
-                var elements = _driver.FindElements(By.CssSelector("label, [class*='checkbox'], [class*='challenge']"));
-                foreach (var element in elements)
+                try
                 {
-                    try
+                    // Look for the checkbox label or container
+                    var elements = _driver.FindElements(By.CssSelector("label, [class*='checkbox'], [class*='challenge']"));
+                    foreach (var element in elements)
                     {
-                        var text = element.Text.ToLower();
-                        if (text.Contains("human") || text.Contains("verify") || text.Contains("robot"))
+                        try
                         {
-                            // Move to element first
-                            var actions = new Actions(_driver);
-                            actions.MoveToElement(element).Perform();
-                            await Task.Delay(500);
-                            
-                            element.Click();
-                            Console.WriteLine("[Akakce] ? Clicked verify element");
-                            await Task.Delay(3000);
-                            return true;
+                            var text = element.Text.ToLower();
+                            if (text.Contains("human") || text.Contains("verify") || text.Contains("robot"))
+                            {
+                                // Move to element first
+                                var actions = new Actions(_driver);
+                                actions.MoveToElement(element).Perform();
+                                await Task.Delay(500);
+                                
+                                element.Click();
+                                Console.WriteLine("[Akakce] ? Clicked verify element");
+                                await Task.Delay(3000);
+                                return true;
+                            }
                         }
+                        catch { }
                     }
-                    catch { }
                 }
+                catch { }
+                
+                // Wait and retry
+                Console.WriteLine("[Akakce] Retry clicking Turnstile checkbox...");
+                await Task.Delay(2000);
             }
-            catch { }
             
             Console.WriteLine("[Akakce] Could not find Turnstile checkbox - manual action may be required");
             return false;
@@ -445,13 +458,14 @@ public class AkakceScraper : IDisposable
             if (isCloudflare || hasTurnstile)
             {
                 wasCloudflare = true;
+                _cloudflareDetected = true; // Mark that we've seen Cloudflare
                 var elapsed = (int)(DateTime.Now - startTime).TotalSeconds;
                 
                 // Try to click Turnstile checkbox once
                 if (hasTurnstile && !turnstileClickAttempted)
                 {
                     turnstileClickAttempted = true;
-                    Console.WriteLine("[Akakce] ?? Turnstile challenge detected - attempting to solve...");
+                    Console.WriteLine("[Akakce] 🔐 Turnstile challenge detected - attempting to solve...");
                     
                     if (await TryClickTurnstileCheckbox())
                     {
@@ -460,13 +474,13 @@ public class AkakceScraper : IDisposable
                     }
                     else
                     {
-                        Console.WriteLine("[Akakce] ? Please click the 'Verify you are human' checkbox manually...");
+                        Console.WriteLine("[Akakce] ✋ Please click the 'Verify you are human' checkbox manually...");
                     }
                 }
                 
                 if (elapsed % 10 == 0)
                 {
-                    Console.WriteLine($"[Akakce] ? Waiting for Cloudflare... ({elapsed}s)");
+                    Console.WriteLine($"[Akakce] ⏳ Waiting for Cloudflare... ({elapsed}s)");
                     
                     // Simulate human behavior while waiting
                     await SimulateHumanBehavior();
@@ -478,12 +492,12 @@ public class AkakceScraper : IDisposable
             {
                 if (wasCloudflare)
                 {
-                    Console.WriteLine($"[Akakce] ? Cloudflare challenge passed! (took {(int)(DateTime.Now - startTime).TotalSeconds}s)");
+                    Console.WriteLine($"[Akakce] ✅ Cloudflare challenge passed! (took {(int)(DateTime.Now - startTime).TotalSeconds}s)");
                     _productsScrapedSinceLastChallenge = 0; // Reset counter
                 }
                 else
                 {
-                    Console.WriteLine("[Akakce] ? No Cloudflare challenge detected");
+                    Console.WriteLine("[Akakce] ✅ No Cloudflare challenge detected");
                 }
                 return true;
             }
@@ -493,7 +507,7 @@ public class AkakceScraper : IDisposable
             }
         }
         
-        Console.WriteLine($"[Akakce] ? Cloudflare challenge timeout after {maxWaitSeconds}s");
+        Console.WriteLine($"[Akakce] ⏰ Cloudflare challenge timeout after {maxWaitSeconds}s");
         Console.WriteLine("[Akakce] TIP: Solve the CAPTCHA manually, then the scraping will continue");
         return false;
     }
@@ -509,36 +523,41 @@ public class AkakceScraper : IDisposable
             {
                 Console.WriteLine($"[Akakce] Loading: {url.Substring(0, Math.Min(80, url.Length))}... (attempt {attempt}/{maxRetries})");
                 
-                // Add significant delay between products to avoid triggering Cloudflare
+                // Add delay between products - use shorter delay if no Cloudflare detected
                 if (_productsScrapedSinceLastChallenge > 0)
                 {
-                    var delaySeconds = _random.Next(MIN_DELAY_BETWEEN_PRODUCTS, MAX_DELAY_BETWEEN_PRODUCTS);
-                    Console.WriteLine($"[Akakce] ?? Waiting {delaySeconds}s before loading...");
+                    int minDelay = _cloudflareDetected ? MIN_DELAY_CLOUDFLARE : MIN_DELAY_BETWEEN_PRODUCTS;
+                    int maxDelay = _cloudflareDetected ? MAX_DELAY_CLOUDFLARE : MAX_DELAY_BETWEEN_PRODUCTS;
+                    var delaySeconds = _random.Next(minDelay, maxDelay);
+                    Console.WriteLine($"[Akakce] ⏳ Waiting {delaySeconds}s before loading...");
                     await Task.Delay(delaySeconds * 1000);
                 }
                 
-                // Simulate human behavior before navigation
-                if (attempt > 1 || _productsScrapedSinceLastChallenge > 0)
+                // Only simulate human behavior on retries or if Cloudflare was detected
+                if (attempt > 1 || _cloudflareDetected)
                 {
-                    await SimulateHumanBehavior(true);
+                    await SimulateHumanBehavior(extensive: attempt > 1);
                 }
                 
                 // Add random delay on retry
                 if (attempt > 1)
                 {
-                    var retryDelay = _random.Next(5000, 10000) * attempt;
+                    var retryDelay = _random.Next(3000, 6000) * attempt;
                     Console.WriteLine($"[Akakce] Retry delay: {retryDelay / 1000}s...");
                     await Task.Delay(retryDelay);
                 }
                 
                 _driver!.Navigate().GoToUrl(url);
-                await RandomDelay(2000, 4000);
+                await RandomDelay(1000, 2000); // Reduced from 2-4s
                 
                 // Wait for Cloudflare with human behavior
                 if (await WaitForCloudflareWithHumanBehavior())
                 {
-                    // Additional human-like behavior after page load
-                    await SimulateHumanBehavior();
+                    // Only do extensive human behavior if Cloudflare was detected
+                    if (_cloudflareDetected)
+                    {
+                        await SimulateHumanBehavior();
+                    }
                     _productsScrapedSinceLastChallenge++;
                     return true;
                 }
@@ -557,9 +576,9 @@ public class AkakceScraper : IDisposable
     }
 
     /// <summary>
-    /// Scrape a single Akakce product page
+    /// Scrape a single Akakce product page with optional variant scanning
     /// </summary>
-    public async Task<AkakceProductInfo> ScrapeProductAsync(string productUrl)
+    public async Task<AkakceProductInfo> ScrapeProductAsync(string productUrl, bool scanAllVariants = false)
     {
         var product = new AkakceProductInfo
         {
@@ -593,18 +612,18 @@ public class AkakceScraper : IDisposable
                 return product;
             }
             
-            // Scroll to trigger lazy loading
+            // Scroll to trigger lazy loading - reduced iterations from 5 to 3
             Console.WriteLine("[Akakce] Loading seller list...");
             var jsExecutor = (IJavaScriptExecutor)_driver!;
             
-            for (int i = 1; i <= 5; i++)
+            for (int i = 1; i <= 3; i++)
             {
-                jsExecutor.ExecuteScript($"window.scrollTo(0, document.body.scrollHeight * {i * 0.2});");
-                await RandomDelay(300, 600);
+                jsExecutor.ExecuteScript($"window.scrollTo(0, document.body.scrollHeight * {i * 0.33});");
+                await RandomDelay(200, 400); // Reduced from 300-600ms
             }
             
             jsExecutor.ExecuteScript("window.scrollTo(0, 0);");
-            await RandomDelay(400, 800);
+            await RandomDelay(300, 500); // Reduced from 400-800ms
             
             var html = _driver.PageSource;
             Console.WriteLine($"[Akakce] Page loaded. Title: {_driver.Title}");
@@ -615,17 +634,41 @@ public class AkakceScraper : IDisposable
             // Extract product details from page
             await ExtractProductDetails(htmlDoc, html, product);
             
-            // Extract sellers using JavaScript execution on the page
-            await ExtractSellersViaSelenium(product, html);
-
-            if (product.Sellers.Count > 0)
+            // Check if product has variants and scanAllVariants is enabled
+            if (scanAllVariants)
             {
-                Console.WriteLine($"[Akakce] ? SUCCESS: {product.Name}");
-                Console.WriteLine($"[Akakce]   Sellers: {product.SellerCount} | Range: {product.LowestPrice} - {product.HighestPrice}");
+                var variantInfos = await DetectAndExtractVariants(jsExecutor);
+                
+                if (variantInfos.Count > 0)
+                {
+                    Console.WriteLine($"[Akakce] Found {variantInfos.Count} variant URLs to scrape");
+                    await ScrapeAllVariants(product, variantInfos, jsExecutor);
+                }
+                else
+                {
+                    // No variants detected - scrape as single product
+                    Console.WriteLine($"[Akakce] No variants detected, scraping as single product");
+                    await ExtractSellersViaSelenium(product, html);
+                }
             }
             else
             {
-                Console.WriteLine($"[Akakce] ? No sellers found for: {product.Name}");
+                // Default behavior - scrape current variant only
+                await ExtractSellersViaSelenium(product, html);
+            }
+
+            if (product.HasVariants)
+            {
+                var totalSellers = product.Variants.Sum(v => v.SellerCount);
+                Console.WriteLine($"[Akakce] ✅ SUCCESS: {product.Name} - {product.Variants.Count} variants, {totalSellers} total sellers");
+            }
+            else if (product.Sellers.Count > 0)
+            {
+                Console.WriteLine($"[Akakce] ✅ SUCCESS: {product.Name} - {product.SellerCount} sellers");
+            }
+            else
+            {
+                Console.WriteLine($"[Akakce] ⚠ No sellers found for: {product.Name}");
                 product.ErrorMessage = "No sellers extracted";
             }
         }
@@ -637,7 +680,254 @@ public class AkakceScraper : IDisposable
 
         return product;
     }
+    
+    public static bool IsValidAkakceUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        return url.Contains("akakce.com") && url.Contains(",") && url.EndsWith(".html");
+    }
 
+    /// <summary>
+    /// Detect variant URLs on the page (e.g., color variants, storage options)
+    /// Variants in Akakce are separate product pages with their own URLs
+    /// </summary>
+    private async Task<List<VariantInfo>> DetectAndExtractVariants(IJavaScriptExecutor jsExecutor)
+    {
+        var variants = new List<VariantInfo>();
+        
+        try
+        {
+            Console.WriteLine("[Akakce] Detecting product variants...");
+            
+            // Extract variant URLs from the page
+            // Variants are in: 
+            // - #PRV_v8 (Renk seçenekleri - Color options)
+            // - #PRG_v8 (Seçenekler - Storage/capacity options)
+            var variantData = jsExecutor.ExecuteScript(@"
+                var variants = [];
+                
+                // Helper function to extract variants from a container
+                function extractVariants(container, groupName) {
+                    if (!container) return;
+                    
+                    var links = container.querySelectorAll('li a[href]');
+                    links.forEach(function(link) {
+                        var href = link.getAttribute('href') || '';
+                        var title = link.getAttribute('title') || '';
+                        var text = link.textContent.trim();
+                        
+                        // Get variant name from the link text or title
+                        var variantName = title || text.split('\n')[0].trim();
+                        
+                        // Clean up the variant name
+                        variantName = variantName.replace(/\d+[\.,]\d+\s*TL/g, '').trim();
+                        
+                        // Check if this is a valid product URL
+                        if (href && href.match(/,\d+\.html$/)) {
+                            // Make URL absolute
+                            var fullUrl = href;
+                            if (href.startsWith('/')) {
+                                fullUrl = 'https://www.akakce.com' + href;
+                            }
+                            
+                            // Check if it's the current page (marked with class 'c')
+                            var isCurrent = link.closest('li')?.classList.contains('c') || false;
+                            
+                            variants.push({
+                                url: fullUrl,
+                                name: variantName,
+                                group: groupName,
+                                isCurrent: isCurrent
+                            });
+                        }
+                    });
+                }
+                
+                // Look for color variants (PRV_v8)
+                var colorContainer = document.querySelector('#PRV_v8');
+                if (colorContainer) {
+                    console.log('[Akakce Variants] Found color variants container');
+                    extractVariants(colorContainer, 'Color');
+                }
+                
+                // Look for storage/capacity variants (PRG_v8)
+                var storageContainer = document.querySelector('#PRG_v8');
+                if (storageContainer) {
+                    console.log('[Akakce Variants] Found storage variants container');
+                    extractVariants(storageContainer, 'Storage');
+                }
+                
+                // Also look for generic variant containers with class prv_v8
+                var genericContainers = document.querySelectorAll('span.prv_v8 ul');
+                genericContainers.forEach(function(container, idx) {
+                    if (container.id !== 'PRV_v8' && container.id !== 'PRG_v8') {
+                        console.log('[Akakce Variants] Found generic variants container #' + idx);
+                        extractVariants(container, 'Option' + (idx + 1));
+                    }
+                });
+                
+                console.log('[Akakce Variants] Total variants found: ' + variants.length);
+                return JSON.stringify(variants);
+            ");
+            
+            if (variantData != null && !string.IsNullOrEmpty(variantData.ToString()))
+            {
+                using var doc = JsonDocument.Parse(variantData.ToString()!);
+                
+                foreach (var item in doc.RootElement.EnumerateArray())
+                {
+                    var url = item.GetProperty("url").GetString() ?? "";
+                    var name = item.GetProperty("name").GetString() ?? "";
+                    var group = item.GetProperty("group").GetString() ?? "";
+                    var isCurrent = item.GetProperty("isCurrent").GetBoolean();
+                    
+                    if (!string.IsNullOrEmpty(url) && !string.IsNullOrEmpty(name))
+                    {
+                        variants.Add(new VariantInfo
+                        {
+                            Url = url,
+                            Name = name,
+                            Group = group,
+                            IsCurrent = isCurrent
+                        });
+                    }
+                }
+                
+                Console.WriteLine($"[Akakce] Detected {variants.Count} variant URLs:");
+                foreach (var v in variants)
+                {
+                    var marker = v.IsCurrent ? " (current)" : "";
+                    Console.WriteLine($"[Akakce]   - [{v.Group}] {v.Name}{marker}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Akakce] Variant detection error: {ex.Message}");
+        }
+        
+        await Task.CompletedTask;
+        return variants;
+    }
+
+    /// <summary>
+    /// Helper class for variant information
+    /// </summary>
+    private class VariantInfo
+    {
+        public string Url { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Group { get; set; } = "";
+        public bool IsCurrent { get; set; }
+    }
+
+    /// <summary>
+    /// Scrape sellers for all variant URLs by navigating to each variant page
+    /// </summary>
+    private async Task ScrapeAllVariants(
+        AkakceProductInfo product, 
+        List<VariantInfo> variantInfos,
+        IJavaScriptExecutor jsExecutor)
+    {
+        int variantIndex = 1;
+        int totalVariants = variantInfos.Count;
+        
+        // First, if current page has variants, scrape the current variant
+        var currentVariant = variantInfos.FirstOrDefault(v => v.IsCurrent);
+        
+        foreach (var variantInfo in variantInfos)
+        {
+            try
+            {
+                Console.WriteLine($"[Akakce] Scraping variant {variantIndex}/{totalVariants}: {variantInfo.Name}");
+                
+                // If this is NOT the current page, navigate to the variant URL
+                if (!variantInfo.IsCurrent)
+                {
+                    Console.WriteLine($"[Akakce] Navigating to variant URL: {variantInfo.Url}");
+                    
+                    // Navigate with retry logic
+                    if (!await NavigateWithRetry(variantInfo.Url, 2))
+                    {
+                        Console.WriteLine($"[Akakce] ⚠ Failed to load variant page: {variantInfo.Name}");
+                        variantIndex++;
+                        continue;
+                    }
+                    
+                    // Scroll to trigger lazy loading
+                    var js = (IJavaScriptExecutor)_driver!;
+                    for (int i = 1; i <= 3; i++)
+                    {
+                        js.ExecuteScript($"window.scrollTo(0, document.body.scrollHeight * {i * 0.3});");
+                        await RandomDelay(300, 500);
+                    }
+                    js.ExecuteScript("window.scrollTo(0, 0);");
+                    await RandomDelay(300, 500);
+                }
+                
+                // Extract sellers for this variant
+                var html = _driver!.PageSource;
+                var variantProduct = new AkakceProductInfo
+                {
+                    ProductUrl = variantInfo.Url,
+                    ProductId = ExtractProductIdFromUrl(variantInfo.Url),
+                    Name = product.Name
+                };
+                
+                await ExtractSellersViaSelenium(variantProduct, html);
+                
+                // Create variant object with options dictionary
+                var options = new Dictionary<string, string>
+                {
+                    { variantInfo.Group, variantInfo.Name }
+                };
+                
+                var variant = new AkakceProductVariant
+                {
+                    Options = options,
+                    VariantName = variantInfo.Name,
+                    VariantUrl = variantInfo.Url,
+                    Sellers = variantProduct.Sellers,
+                    LowestPrice = variantProduct.LowestPrice,
+                    HighestPrice = variantProduct.HighestPrice
+                };
+                
+                product.Variants.Add(variant);
+                
+                Console.WriteLine($"[Akakce] ✓ Variant '{variantInfo.Name}': {variant.SellerCount} sellers, range: {variant.LowestPrice} - {variant.HighestPrice}");
+                
+                variantIndex++;
+                
+                // Add delay between variants to avoid triggering Cloudflare
+                if (!variantInfo.IsCurrent && variantIndex <= totalVariants)
+                {
+                    var delay = _random.Next(3000, 5000);
+                    Console.WriteLine($"[Akakce] ⏳ Waiting {delay/1000}s before next variant...");
+                    await Task.Delay(delay);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Akakce] ❌ Error scraping variant {variantIndex}: {ex.Message}");
+                variantIndex++;
+            }
+        }
+        
+        Console.WriteLine($"[Akakce] ✅ Completed scraping {product.Variants.Count} variants");
+    }
+
+    /// <summary>
+    /// Extract product ID from URL
+    /// </summary>
+    private string ExtractProductIdFromUrl(string url)
+    {
+        var idMatch = Regex.Match(url, @",(\d+)\.html$");
+        return idMatch.Success ? idMatch.Groups[1].Value : "";
+    }
+
+    /// <summary>
+    /// Extract product details from page
+    /// </summary>
     private async Task ExtractProductDetails(HtmlDocument htmlDoc, string html, AkakceProductInfo product)
     {
         try
@@ -678,7 +968,6 @@ public class AkakceScraper : IDisposable
             var jsExecutor = (IJavaScriptExecutor)_driver;
             
             // Method 1: Extract from JSON-LD structured data (most reliable)
-            // The JSON-LD contains: "seller":{"@type":"Organization","name":"Marketplace/SellerName"}
             Console.WriteLine("[Akakce] Extracting seller data from JSON-LD...");
             var jsonLdData = jsExecutor.ExecuteScript(@"
                 var results = [];
@@ -688,7 +977,6 @@ public class AkakceScraper : IDisposable
                     try {
                         var data = JSON.parse(script.textContent);
                         
-                        // Check for offers array in Product schema
                         if (data['@type'] === 'Product' && data.offers) {
                             var offersData = data.offers;
                             var offersList = offersData.offers || (offersData['@type'] === 'Offer' ? [offersData] : []);
@@ -699,15 +987,13 @@ public class AkakceScraper : IDisposable
                                     var marketplace = '';
                                     var sellerName = '';
                                     
-                                    // Split by '/' to get Marketplace/SellerName
                                     var slashIndex = fullName.indexOf('/');
                                     if (slashIndex > 0) {
                                         marketplace = fullName.substring(0, slashIndex).trim();
                                         sellerName = fullName.substring(slashIndex + 1).trim();
                                     } else {
-                                        // No slash means marketplace IS the seller
                                         marketplace = fullName.trim();
-                                        sellerName = ''; // Leave empty when no sub-seller
+                                        sellerName = '';
                                     }
                                     
                                     results.push({
@@ -731,7 +1017,6 @@ public class AkakceScraper : IDisposable
                 Console.WriteLine($"[Akakce] Found {count} sellers in JSON-LD structured data");
                 ParseJsonLdPrices(jsonLdData.ToString()!, product);
                 
-                // Enrich with DOM data if we have sellers but missing names
                 if (product.Sellers.Count > 0)
                 {
                     await EnrichSellerNamesViaDom(product);
@@ -763,7 +1048,6 @@ public class AkakceScraper : IDisposable
                 Console.WriteLine($"[Akakce] Found {count} sellers in qvPrices");
                 ParseQvPricesJson(pricesJson.ToString()!, product);
                 
-                // Enrich with DOM data since qvPrices lacks seller names
                 if (product.Sellers.Count > 0)
                 {
                     await EnrichSellerNamesViaDom(product);
@@ -780,24 +1064,19 @@ public class AkakceScraper : IDisposable
                 sellerItems.forEach(function(item) {
                     var text = item.innerText || '';
                     
-                    // Extract price
                     var priceMatch = text.match(/([0-9]{1,3}(?:\.[0-9]{3})*),(\d{2})\s*(?:TL)?/);
                     if (!priceMatch) return;
                     
                     var price = parseFloat(priceMatch[1].replace(/\./g, '') + '.' + priceMatch[2]);
                     if (price <= 0) return;
                     
-                    // Get marketplace from logo alt
                     var marketplace = '';
                     var img = item.querySelector('img[alt]');
                     if (img && img.alt) {
                         marketplace = img.alt.trim();
                     }
                     
-                    // Find seller name - look for '/SellerName' pattern
                     var sellerName = '';
-                    
-                    // Method 1: Find elements that start with '/'
                     var allElements = item.querySelectorAll('a span, a b, a > *');
                     for (var i = 0; i < allElements.length; i++) {
                         var el = allElements[i];
@@ -807,50 +1086,15 @@ public class AkakceScraper : IDisposable
                             var candidate = elText.substring(1).trim();
                             candidate = candidate.split('\n')[0].trim();
                             candidate = candidate.split('Satıcıya')[0].trim();
-                            candidate = candidate.split('Stokta')[0].trim();
-                            candidate = candidate.split('Son güncelleme')[0].trim();
-                            candidate = candidate.split('Kaçırılmayacak')[0].trim();
-                            candidate = candidate.split('Bugün')[0].trim();
-                            candidate = candidate.split('Kargo')[0].trim();
                             
                             if (candidate && candidate.length > 1 && candidate.length < 50 &&
-                                !candidate.match(/^[0-9]/) && !candidate.includes('TL') &&
-                                !candidate.includes(':') && !candidate.includes('gün')) {
+                                !candidate.match(/^[0-9]/) && !candidate.includes('TL')) {
                                 sellerName = candidate;
                                 break;
                             }
                         }
                     }
                     
-                    // Method 2: Look at anchor text for '/' pattern
-                    if (!sellerName) {
-                        var anchors = item.querySelectorAll('a[href]');
-                        for (var j = 0; j < anchors.length; j++) {
-                            var anchorText = anchors[j].textContent || '';
-                            var slashIdx = anchorText.indexOf('/');
-                            if (slashIdx > 0 && slashIdx < anchorText.length - 1) {
-                                var afterSlash = anchorText.substring(slashIdx + 1).trim();
-                                afterSlash = afterSlash.split('\n')[0].trim();
-                                afterSlash = afterSlash.split('Satıcıya')[0].trim();
-                                afterSlash = afterSlash.split('Stokta')[0].trim();
-                                afterSlash = afterSlash.split('Son güncelleme')[0].trim();
-                                afterSlash = afterSlash.split('Kaçırılmayacak')[0].trim();
-                                afterSlash = afterSlash.split('Bugün')[0].trim();
-                                afterSlash = afterSlash.split('Kargo')[0].trim();
-                                afterSlash = afterSlash.split(' iş günü')[0].trim();
-                                
-                                if (afterSlash && afterSlash.length > 1 && afterSlash.length < 50 &&
-                                    !afterSlash.match(/^[0-9]/) && !afterSlash.includes('TL') &&
-                                    !afterSlash.includes(':') && !afterSlash.includes('gün') &&
-                                    !afterSlash.includes('Fırsatlar') && !afterSlash.includes('dakika')) {
-                                    sellerName = afterSlash;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Get link
                     var linkUrl = '';
                     var linkEl = item.querySelector('a[href]');
                     if (linkEl) linkUrl = linkEl.href;
@@ -882,10 +1126,6 @@ public class AkakceScraper : IDisposable
         await Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Enriches seller data by extracting seller names from DOM
-    /// Useful when JSON-LD or qvPrices provide marketplace but miss seller name
-    /// </summary>
     private async Task EnrichSellerNamesViaDom(AkakceProductInfo product)
     {
         if (_driver == null) return;
@@ -894,130 +1134,27 @@ public class AkakceScraper : IDisposable
         {
             var jsExecutor = (IJavaScriptExecutor)_driver;
             
-            // Extract seller names from DOM - looking specifically for the "/SellerName" pattern
-            // In Akakce, the structure is: <img alt="marketplace"> followed by /sellerName as a direct text or in a specific element
             var sellerNamesJson = jsExecutor.ExecuteScript(@"
                 var names = [];
                 var items = document.querySelectorAll('#APL li, ul.pl_v8 > li, ul.pl_v9 > li, li.p_w');
                 
                 items.forEach(function(item) {
                     var sellerName = '';
-                    var marketplace = '';
                     
-                    // Get marketplace from image alt
-                    var img = item.querySelector('img[alt]');
-                    if (img && img.alt) {
-                        marketplace = img.alt.trim().toLowerCase();
-                    }
-                    
-                    // PRIMARY METHOD: Look for the seller info container that has the /name pattern
-                    // The seller name appears right after the marketplace logo with a '/' prefix
-                    // HTML structure often: <a>...<img alt='n11'>...<span>/btkurumsal</span>...</a>
-                    
-                    // Method 1: Find direct text nodes or spans that start with '/'
                     var allElements = item.querySelectorAll('a span, a b, a > *');
                     for (var i = 0; i < allElements.length; i++) {
                         var el = allElements[i];
                         var text = (el.textContent || '').trim();
                         
-                        // Look for text that starts with '/' - this is the seller name indicator
                         if (text.startsWith('/') && text.length > 1 && text.length < 60) {
-                            var candidate = text.substring(1).trim(); // Remove the leading '/'
-                            
-                            // Clean up: remove any trailing noise
+                            var candidate = text.substring(1).trim();
                             candidate = candidate.split('\n')[0].trim();
                             candidate = candidate.split('Satıcıya')[0].trim();
-                            candidate = candidate.split('Kaçırılmayacak')[0].trim();
-                            candidate = candidate.split('Fırsatlar')[0].trim();
-                            candidate = candidate.split('Bugün')[0].trim();
-                            candidate = candidate.split('Kargo')[0].trim();
-                            candidate = candidate.split(' iş günü')[0].trim();
                             
-                            // Validate: should be alphanumeric, not a price, not a date/time
-                            if (candidate && 
-                                candidate.length > 1 && 
-                                candidate.length < 50 &&
-                                !candidate.match(/^[0-9]/) &&
-                                !candidate.includes('TL') &&
-                                !candidate.includes(':') &&
-                                !candidate.includes('gün') &&
-                                !candidate.includes('adet')) {
+                            if (candidate && candidate.length > 1 && candidate.length < 50 &&
+                                !candidate.match(/^[0-9]/) && !candidate.includes('TL')) {
                                 sellerName = candidate;
                                 break;
-                            }
-                        }
-                    }
-                    
-                    // Method 2: If not found, look at anchor text for '/' pattern
-                    if (!sellerName) {
-                        var anchors = item.querySelectorAll('a[href]');
-                        for (var j = 0; j < anchors.length; j++) {
-                            var anchor = anchors[j];
-                            var anchorText = anchor.textContent || '';
-                            
-                            // Find the '/' in the anchor text
-                            var slashIdx = anchorText.indexOf('/');
-                            if (slashIdx > 0 && slashIdx < anchorText.length - 1) {
-                                var afterSlash = anchorText.substring(slashIdx + 1).trim();
-                                
-                                // Take first word/segment
-                                afterSlash = afterSlash.split('\n')[0].trim();
-                                afterSlash = afterSlash.split('Satıcıya')[0].trim();
-                                afterSlash = afterSlash.split('Kaçırılmayacak')[0].trim();
-                                afterSlash = afterSlash.split('Fırsatlar')[0].trim();
-                                afterSlash = afterSlash.split('Bugün')[0].trim();
-                                afterSlash = afterSlash.split('Kargo')[0].trim();
-                                afterSlash = afterSlash.split(' iş günü')[0].trim();
-                                
-                                // Validate
-                                if (afterSlash && 
-                                    afterSlash.length > 1 && 
-                                    afterSlash.length < 50 &&
-                                    !afterSlash.match(/^[0-9]/) &&
-                                    !afterSlash.includes('TL') &&
-                                    !afterSlash.includes(':') &&
-                                    !afterSlash.includes('dakika') &&
-                                    !afterSlash.includes('gün') &&
-                                    !afterSlash.includes('adet') &&
-                                    !afterSlash.includes('Fırsatlar')) {
-                                    sellerName = afterSlash;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Method 3: Last resort - check for span elements near the marketplace logo
-                    if (!sellerName) {
-                        var spans = item.querySelectorAll('span');
-                        for (var k = 0; k < spans.length; k++) {
-                            var span = spans[k];
-                            var spanText = (span.textContent || '').trim();
-                            var spanClass = (span.className || '').toLowerCase();
-                            
-                            // Skip known non-seller patterns
-                            if (!spanText || spanText.length < 2 || spanText.length > 50) continue;
-                            if (spanText.includes('TL') || spanText.includes('kargo')) continue;
-                            if (spanText.includes('Satıcıya') || spanText.includes('Git')) continue;
-                            if (spanText.includes('Kaçırılmayacak') || spanText.includes('Fırsatlar')) continue;
-                            if (spanText.includes('güncelleme') || spanText.includes('Bugün')) continue;
-                            if (spanText.includes('En Ucuz') || spanText.includes('Dahil')) continue;
-                            if (spanText.includes('iş günü') || spanText.includes('dakika')) continue;
-                            if (spanClass.includes('price') || spanClass.includes('btn')) continue;
-                            if (spanText.match(/^[0-9]{1,2}:[0-9]{2}/)) continue; // Time pattern
-                            if (spanText.match(/^[0-9]{1,3}[\.\,][0-9]{3}/)) continue; // Price pattern
-                            
-                            // Check if it starts with '/'
-                            if (spanText.startsWith('/')) {
-                                sellerName = spanText.substring(1).trim();
-                                break;
-                            }
-                            
-                            // Check if different from marketplace and looks like a name
-                            if (spanText.toLowerCase() !== marketplace &&
-                                spanText.match(/^[A-Za-z0-9ığüşöçİĞÜŞÖÇ]/)) {
-                                // Could be seller name, but be cautious
-                                // Only use if no better option
                             }
                         }
                     }
@@ -1032,68 +1169,24 @@ public class AkakceScraper : IDisposable
             {
                 var names = System.Text.Json.JsonSerializer.Deserialize<List<string>>(sellerNamesJson.ToString()!);
                 
-                if (names != null && names.Count > 0)
+                if (names != null && names.Count > 0 && names.Count == product.Sellers.Count)
                 {
-                    Console.WriteLine($"[Akakce] Found {names.Count} potential names in DOM for enrichment");
-                    
-                    // SAFETY CHECK: Only proceed if we have matching counts
-                    if (names.Count != product.Sellers.Count)
-                    {
-                        Console.WriteLine($"[Akakce] WARNING: Seller count mismatch (Sellers: {product.Sellers.Count}, DOM names: {names.Count}) - skipping enrichment to avoid data corruption");
-                        return;
-                    }
-                    
                     int enrichedCount = 0;
-                    int skippedCount = 0;
                     foreach (var seller in product.Sellers)
                     {
-                        // Only enrich if SellerName is empty AND we have a valid index
                         if (string.IsNullOrEmpty(seller.SellerName) && seller.Rank <= names.Count)
                         {
                             var domName = names[seller.Rank - 1];
-                            
-                            // Validate the name - must not be noise
-                            bool isValid = !string.IsNullOrWhiteSpace(domName) &&
-                                !domName.Equals(seller.Marketplace, StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("Satıcıya", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("Kaçırılmayacak", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("Fırsatlar", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("güncelleme", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("En Ucuz", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("Kargo", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("Bugün", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("iş günü", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("dakika", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains("adet", StringComparison.OrdinalIgnoreCase) &&
-                                !domName.Contains(":", StringComparison.OrdinalIgnoreCase) &&
-                                domName.Length >= 2 &&
-                                domName.Length < 50 &&
-                                !Regex.IsMatch(domName, @"^\d");
-                            
-                            if (isValid)
+                            if (!string.IsNullOrWhiteSpace(domName) && domName.Length >= 2 && domName.Length < 50)
                             {
                                 seller.SellerName = domName;
                                 enrichedCount++;
-                                if (enrichedCount <= 3)
-                                {
-                                    Console.WriteLine($"[Akakce] Enriched Seller {seller.Rank}: {seller.Marketplace} -> {seller.SellerName}");
-                                }
-                            }
-                            else
-                            {
-                                // DON'T ASSIGN ANYTHING - leave SellerName empty if invalid
-                                skippedCount++;
                             }
                         }
                     }
-                    
-                    if (enrichedCount > 3)
+                    if (enrichedCount > 0)
                     {
-                        Console.WriteLine($"[Akakce] ... and {enrichedCount - 3} more sellers enriched");
-                    }
-                    if (skippedCount > 0)
-                    {
-                        Console.WriteLine($"[Akakce] Skipped {skippedCount} invalid/noise values");
+                        Console.WriteLine($"[Akakce] Enriched {enrichedCount} seller names from DOM");
                     }
                 }
             }
@@ -1121,9 +1214,6 @@ public class AkakceScraper : IDisposable
         return price.ToString("N2", new System.Globalization.CultureInfo("tr-TR")) + " TL";
     }
 
-    /// <summary>
-    /// Parse JSON-LD structured data - most reliable source for Marketplace/SellerName
-    /// </summary>
     private void ParseJsonLdPrices(string json, AkakceProductInfo product)
     {
         try
@@ -1132,9 +1222,6 @@ public class AkakceScraper : IDisposable
             int rank = 1;
             decimal? lowestPrice = null;
             decimal? highestPrice = null;
-            int totalItems = doc.RootElement.GetArrayLength();
-
-            Console.WriteLine($"[Akakce] Parsing {totalItems} sellers from JSON-LD...");
 
             foreach (var priceItem in doc.RootElement.EnumerateArray())
             {
@@ -1146,7 +1233,6 @@ public class AkakceScraper : IDisposable
                     ParentProductName = product.Name
                 };
 
-                // Get price
                 if (priceItem.TryGetProperty("price", out var priceEl) && priceEl.TryGetDecimal(out var price))
                 {
                     seller.Price = price;
@@ -1155,29 +1241,19 @@ public class AkakceScraper : IDisposable
                     if (!highestPrice.HasValue || price > highestPrice) highestPrice = price;
                 }
 
-                // Get marketplace (before the slash)
                 if (priceItem.TryGetProperty("marketplace", out var marketplaceEl))
                 {
                     seller.Marketplace = marketplaceEl.GetString() ?? "";
                 }
                 
-                // Get seller name (after the slash) - may be empty if no sub-seller
                 if (priceItem.TryGetProperty("sellerName", out var sellerNameEl))
                 {
                     seller.SellerName = sellerNameEl.GetString() ?? "";
                 }
-                
-                // If seller name is empty, leave it empty (don't copy marketplace)
-                // This is correct behavior - some listings don't have sub-sellers
 
-                // Get URL
                 if (priceItem.TryGetProperty("url", out var urlEl))
                 {
-                    var url = urlEl.GetString() ?? "";
-                    if (!string.IsNullOrEmpty(url))
-                    {
-                        seller.ProductLink = url;
-                    }
+                    seller.ProductLink = urlEl.GetString() ?? "";
                 }
 
                 if (rank == 1) seller.Badges.Add("En Ucuz");
@@ -1186,13 +1262,6 @@ public class AkakceScraper : IDisposable
                 if (seller.Price > 0 && !string.IsNullOrEmpty(seller.Marketplace))
                 {
                     product.Sellers.Add(seller);
-                    
-                    var displaySeller = string.IsNullOrEmpty(seller.SellerName) ? "(direct)" : seller.SellerName;
-                    if (rank <= 5 || rank % 10 == 0 || rank == totalItems)
-                    {
-                        Console.WriteLine($"[Akakce] Seller {rank}/{totalItems}: {seller.Marketplace} / {displaySeller} - {seller.PriceFormatted}");
-                    }
-                    
                     rank++;
                 }
             }
@@ -1200,8 +1269,6 @@ public class AkakceScraper : IDisposable
             product.SellerCount = product.Sellers.Count;
             if (lowestPrice.HasValue) product.LowestPrice = FormatTurkishPrice(lowestPrice.Value);
             if (highestPrice.HasValue) product.HighestPrice = FormatTurkishPrice(highestPrice.Value);
-            
-            Console.WriteLine($"[Akakce] ? Extracted {product.SellerCount} sellers from JSON-LD");
         }
         catch (Exception ex)
         {
@@ -1209,9 +1276,6 @@ public class AkakceScraper : IDisposable
         }
     }
 
-    /// <summary>
-    /// Parse qvPrices JavaScript variable - only has marketplace (vdName), not seller
-    /// </summary>
     private void ParseQvPricesJson(string json, AkakceProductInfo product)
     {
         try
@@ -1220,9 +1284,6 @@ public class AkakceScraper : IDisposable
             int rank = 1;
             decimal? lowestPrice = null;
             decimal? highestPrice = null;
-            int totalItems = doc.RootElement.GetArrayLength();
-
-            Console.WriteLine($"[Akakce] Parsing {totalItems} sellers from qvPrices...");
 
             foreach (var priceItem in doc.RootElement.EnumerateArray())
             {
@@ -1234,7 +1295,6 @@ public class AkakceScraper : IDisposable
                     ParentProductName = product.Name
                 };
 
-                // Get price
                 if (priceItem.TryGetProperty("price", out var priceEl))
                 {
                     if (priceEl.ValueKind == JsonValueKind.Number)
@@ -1255,28 +1315,13 @@ public class AkakceScraper : IDisposable
                     }
                 }
 
-                // Get marketplace from vdName
-                // Note: qvPrices does NOT contain seller name, only marketplace
-                string vdName = "";
                 if (priceItem.TryGetProperty("vdName", out var vdNameEl))
                 {
-                    vdName = vdNameEl.GetString() ?? "";
+                    seller.Marketplace = vdNameEl.GetString() ?? "";
                 }
                 
-                seller.Marketplace = vdName;
-                seller.SellerName = ""; // qvPrices doesn't have seller info, leave empty
-                
-                // Get badge
-                if (priceItem.TryGetProperty("badge", out var badgeEl))
-                {
-                    var badge = badgeEl.GetString() ?? "";
-                    if (!string.IsNullOrEmpty(badge))
-                    {
-                        seller.Badges.Add(badge);
-                    }
-                }
+                seller.SellerName = "";
 
-                // Get URL
                 if (priceItem.TryGetProperty("url", out var urlEl))
                 {
                     var url = urlEl.GetString() ?? "";
@@ -1293,12 +1338,6 @@ public class AkakceScraper : IDisposable
                 if (seller.Price > 0 && !string.IsNullOrEmpty(seller.Marketplace))
                 {
                     product.Sellers.Add(seller);
-                    
-                    if (rank <= 5 || rank % 10 == 0 || rank == totalItems)
-                    {
-                        Console.WriteLine($"[Akakce] Seller {rank}/{totalItems}: {seller.Marketplace} - {seller.PriceFormatted}");
-                    }
-                    
                     rank++;
                 }
             }
@@ -1306,8 +1345,6 @@ public class AkakceScraper : IDisposable
             product.SellerCount = product.Sellers.Count;
             if (lowestPrice.HasValue) product.LowestPrice = FormatTurkishPrice(lowestPrice.Value);
             if (highestPrice.HasValue) product.HighestPrice = FormatTurkishPrice(highestPrice.Value);
-            
-            Console.WriteLine($"[Akakce] ? Extracted {product.SellerCount} sellers from qvPrices");
         }
         catch (Exception ex)
         {
@@ -1323,9 +1360,6 @@ public class AkakceScraper : IDisposable
             int rank = 1;
             decimal? lowestPrice = null;
             decimal? highestPrice = null;
-            int totalItems = doc.RootElement.GetArrayLength();
-
-            Console.WriteLine($"[Akakce] Parsing {totalItems} DOM seller entries...");
 
             foreach (var priceItem in doc.RootElement.EnumerateArray())
             {
@@ -1337,7 +1371,6 @@ public class AkakceScraper : IDisposable
                     ParentProductName = product.Name
                 };
 
-                // Get price
                 if (priceItem.TryGetProperty("price", out var priceEl) && priceEl.TryGetDecimal(out var price))
                 {
                     seller.Price = price;
@@ -1346,23 +1379,16 @@ public class AkakceScraper : IDisposable
                     if (!highestPrice.HasValue || price > highestPrice) highestPrice = price;
                 }
 
-                // Get marketplace
                 if (priceItem.TryGetProperty("marketplace", out var marketplaceEl))
                 {
                     seller.Marketplace = marketplaceEl.GetString() ?? "";
                 }
                 
-                // Get seller name
                 if (priceItem.TryGetProperty("sellerName", out var sellerNameEl))
                 {
                     seller.SellerName = sellerNameEl.GetString() ?? "";
                 }
-                else
-                {
-                    seller.SellerName = "";
-                }
 
-                // Get URL
                 if (priceItem.TryGetProperty("url", out var urlEl))
                 {
                     var url = urlEl.GetString() ?? "";
@@ -1380,12 +1406,6 @@ public class AkakceScraper : IDisposable
                 if (seller.Price > 0 && !string.IsNullOrEmpty(seller.Marketplace))
                 {
                     product.Sellers.Add(seller);
-                    
-                    if (rank <= 5 || rank % 10 == 0 || rank == totalItems)
-                    {
-                        Console.WriteLine($"[Akakce] DOM Seller {rank}/{totalItems}: {seller.Marketplace} - {seller.PriceFormatted}");
-                    }
-                    
                     rank++;
                 }
             }
@@ -1393,8 +1413,6 @@ public class AkakceScraper : IDisposable
             product.SellerCount = product.Sellers.Count;
             if (lowestPrice.HasValue) product.LowestPrice = FormatTurkishPrice(lowestPrice.Value);
             if (highestPrice.HasValue) product.HighestPrice = FormatTurkishPrice(highestPrice.Value);
-            
-            Console.WriteLine($"[Akakce] ? Extracted {product.SellerCount} sellers from DOM");
         }
         catch (Exception ex)
         {
@@ -1416,21 +1434,20 @@ public class AkakceScraper : IDisposable
             
             if (onProgress != null)
             {
-                await onProgress(5, $"?? Loading category page...", "info");
+                await onProgress(5, $"🔄 Loading category page...", "info");
             }
             
-            // Navigate with retry logic
             if (!await NavigateWithRetry(categoryUrl))
             {
                 if (onProgress != null)
                 {
-                    await onProgress(10, "? Page blocked by Cloudflare after retries", "error");
+                    await onProgress(10, "❌ Page blocked by Cloudflare after retries", "error");
                 }
                 return productUrls;
             }
             
             int pageNumber = 1;
-            int maxPages = 20; // Safety limit
+            int maxPages = 20;
             
             while (productUrls.Count < maxProducts && pageNumber <= maxPages)
             {
@@ -1438,10 +1455,9 @@ public class AkakceScraper : IDisposable
                 
                 if (onProgress != null)
                 {
-                    await onProgress(10, $"?? Page {pageNumber}: Extracting URLs...", "info");
+                    await onProgress(10, $"📄 Page {pageNumber}: Extracting URLs...", "info");
                 }
                 
-                // Scroll to load more products on current page
                 var jsExecutor = (IJavaScriptExecutor)_driver!;
                 for (int i = 1; i <= 5; i++)
                 {
@@ -1449,31 +1465,25 @@ public class AkakceScraper : IDisposable
                     await RandomDelay(300, 600);
                 }
                 
-                // Extract product URLs from current page
                 var urlsJson = jsExecutor.ExecuteScript(@"
                     var urls = [];
                     var seen = {};
                     
-                    // Target ONLY the main product list container - ul#CPL or ul.pl_v9
-                    // This excludes sticky ads, promoted items outside the main list
                     var productList = document.querySelector('ul#CPL') || 
                                      document.querySelector('ul.pl_v9.qv_v9') ||
                                      document.querySelector('ul.pl_v9');
                     
                     if (productList) {
-                        // Get direct child li elements only (not nested ones)
                         var productItems = productList.querySelectorAll(':scope > li[data-pr]');
                         
                         productItems.forEach(function(li) {
-                            // Get the main product link
                             var links = li.querySelectorAll('a[href]');
                             var foundUrl = false;
                             
                             links.forEach(function(a) {
-                                if (foundUrl) return; // Already found URL for this product
+                                if (foundUrl) return;
                                 
                                 var href = a.href;
-                                // Match Akakce product URL pattern: ends with ,{productId}.html
                                 if (href && href.match(/,\d+\.html$/)) {
                                     if (!seen[href]) { 
                                         seen[href] = true; 
@@ -1485,7 +1495,6 @@ public class AkakceScraper : IDisposable
                         });
                     }
                     
-                    // Fallback if main list not found - be more restrictive
                     if (urls.length === 0) {
                         document.querySelectorAll('ul.pl_v9 > li[data-pr] a[href]').forEach(function(a) {
                             var href = a.href;
@@ -1498,8 +1507,6 @@ public class AkakceScraper : IDisposable
                     
                     return JSON.stringify(urls);
                 ");
-                
-                int urlsFoundOnPage = 0;
                 
                 if (urlsJson != null && !string.IsNullOrEmpty(urlsJson.ToString()))
                 {
@@ -1514,113 +1521,63 @@ public class AkakceScraper : IDisposable
                             if (IsValidAkakceUrl(url) && !productUrls.Contains(url))
                             {
                                 productUrls.Add(url);
-                                urlsFoundOnPage++;
-                                
-                                Console.Write($"\r[Akakce] Found: {productUrls.Count}/{maxProducts} product URLs   ");
-                                Console.Out.Flush();
-                                
-                                if (onProgress != null && (productUrls.Count % 10 == 0 || productUrls.Count == maxProducts))
-                                {
-                                    await onProgress(10, $"?? Found {productUrls.Count}/{maxProducts} product URLs", "info");
-                                }
                             }
                         }
                     }
                 }
                 
-                Console.WriteLine();
-                Console.WriteLine($"[Akakce] Page {pageNumber}: Found {urlsFoundOnPage} new URLs (Total: {productUrls.Count})");
+                Console.WriteLine($"[Akakce] Page {pageNumber}: Total URLs: {productUrls.Count}");
                 
                 if (productUrls.Count >= maxProducts)
                 {
-                    Console.WriteLine($"[Akakce] ? Reached target of {maxProducts} products!");
                     break;
                 }
                 
-                // Try to find and navigate to next page
-                bool hasNextPage = false;
-                try
+                // Try to find next page
+                var nextPageUrl = jsExecutor.ExecuteScript(@"
+                    var nextLink = document.querySelector('a.p[title=""Sonraki""]') || document.querySelector('a[title=""Sonraki""]');
+                    return nextLink ? nextLink.href : null;
+                ");
+                
+                if (nextPageUrl != null && !string.IsNullOrEmpty(nextPageUrl.ToString()))
                 {
-                    var nextPageUrl = jsExecutor.ExecuteScript(@"
-                        var nextLink = document.querySelector('a.p[title=""Sonraki""]') || document.querySelector('a[title=""Sonraki""]');
-                        if (!nextLink) {
-                            var links = document.querySelectorAll('a');
-                            for (var i = 0; i < links.length; i++) {
-                                if (links[i].textContent.trim() === 'Sonraki' || links[i].title === 'Sonraki') {
-                                    nextLink = links[i]; break;
-                                }
-                            }
-                        }
-                        return nextLink ? nextLink.href : null;
-                    ");
+                    await Task.Delay(_random.Next(3000, 5000));
                     
-                    if (nextPageUrl != null && !string.IsNullOrEmpty(nextPageUrl.ToString()))
+                    if (await NavigateWithRetry(nextPageUrl.ToString()!, 2))
                     {
-                        var nextUrl = nextPageUrl.ToString()!;
-                        Console.WriteLine($"[Akakce] Navigating to next page: {nextUrl}");
-                        await Task.Delay(_random.Next(3000, 5000));
-                        
-                        if (await NavigateWithRetry(nextUrl, 2))
-                        {
-                            hasNextPage = true;
-                            pageNumber++;
-                        }
-                        else
-                        {
-                            Console.WriteLine("[Akakce] Failed to load next page");
-                            break;
-                        }
+                        pageNumber++;
                     }
                     else
                     {
-                        Console.WriteLine("[Akakce] No next page found");
                         break;
                     }
                 }
-                catch (Exception ex)
+                else
                 {
-                    Console.WriteLine($"[Akakce] Error navigating to next page: {ex.Message}");
                     break;
                 }
             }
             
-            Console.WriteLine($"[Akakce] ? Extracted {productUrls.Count} product URLs from {pageNumber} page(s)");
+            Console.WriteLine($"[Akakce] ✓ Extracted {productUrls.Count} product URLs from {pageNumber} page(s)");
             
             if (onProgress != null)
             {
-                if (productUrls.Count > 0)
-                {
-                    await onProgress(15, $"? Found {productUrls.Count} product URLs from {pageNumber} page(s)", "success");
-                }
-                else
-                {
-                    await onProgress(15, "? No product URLs found on page", "error");
-                }
+                await onProgress(15, $"✓ Found {productUrls.Count} product URLs", "success");
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[Akakce] Error extracting URLs: {ex.Message}");
-            if (onProgress != null)
-            {
-                await onProgress(10, $"? Error: {ex.Message}", "error");
-            }
         }
         
         return productUrls;
-    }
-
-    public static bool IsValidAkakceUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return false;
-        return url.Contains("akakce.com") && url.Contains(",") && url.EndsWith(".html");
     }
 
     public void Dispose()
     {
         if (_driver != null)
         {
-            Console.WriteLine("[Akakce] Closing Chrome (profile saved for next time)...");
+            Console.WriteLine("[Akakce] Closing browser...");
             try { _driver.Quit(); } catch { }
             try { _driver.Dispose(); } catch { }
             _driver = null;

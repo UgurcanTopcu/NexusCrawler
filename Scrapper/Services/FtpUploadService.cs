@@ -1,5 +1,5 @@
 using Scrapper.Models;
-
+using WinSCP;
 namespace Scrapper.Services;
 
 public class FtpUploadService
