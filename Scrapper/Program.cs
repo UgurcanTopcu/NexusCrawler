@@ -316,8 +316,8 @@ app.MapGet("/", () => Results.Content("""
             
             <div class="form-group">
                 <label for="maxProducts">Maximum Products</label>
-                <input type="number" id="maxProducts" name="maxProducts" min="1" max="2000" value="20" required>
-                <div class="input-hint">Choose between 1 and 2000 products</div>
+                <input type="number" id="maxProducts" name="maxProducts" min="1" value="20" required>
+                <div class="input-hint">Enter any number - no limit</div>
             </div>
             
             <div class="form-group">
@@ -795,8 +795,8 @@ app.MapGet("/akakce", () => Results.Content("""
                 
                 <div class="form-group">
                     <label for="maxProducts">Maximum Products</label>
-                    <input type="number" id="maxProducts" min="1" max="2000" value="20">
-                    <div class="input-hint">Limit: 1-2000 products (will paginate through category pages)</div>
+                    <input type="number" id="maxProducts" min="1" value="20">
+                    <div class="input-hint">Enter any number - no limit</div>
                 </div>
                 
                 <div class="form-group">
