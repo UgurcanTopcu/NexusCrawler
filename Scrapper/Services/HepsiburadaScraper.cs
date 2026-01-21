@@ -1136,18 +1136,22 @@ public class HepsiburadaScraper : IDisposable
     /// Converts Hepsiburada image URL to high resolution (1000x1000)
     /// Example: https://productimages.hepsiburada.net/s/777/424-600/110000936663290.jpg
     ///       -> https://productimages.hepsiburada.net/s/777/1000-1000/110000936663290.jpg
+    /// Also handles: /s/777/375/... -> /s/777/1000-1000/...
     /// </summary>
     private string ConvertToHighResImage(string imageUrl)
     {
         if (string.IsNullOrEmpty(imageUrl))
             return imageUrl;
         
-        // Pattern: /s/{number}/{dimensions}/{imageid}.jpg
+        // Pattern 1: /s/{number}/{dimensions like 424-600}/{imageid}.jpg
         // Replace dimensions like 424-600, 48-64, 222-222, etc. with 1000-1000
-        var pattern = @"/s/(\d+)/(\d+-\d+)/";
-        var replacement = "/s/$1/1000-1000/";
+        var pattern1 = @"/s/(\d+)/(\d+-\d+)/";
+        var result = Regex.Replace(imageUrl, pattern1, "/s/$1/1000-1000/");
         
-        var result = Regex.Replace(imageUrl, pattern, replacement);
+        // Pattern 2: /s/{number}/{single number like 375}/{imageid}
+        // Replace single dimension numbers (2-4 digits) with 1000-1000
+        var pattern2 = @"/s/(\d+)/(\d{2,4})/";
+        result = Regex.Replace(result, pattern2, "/s/$1/1000-1000/");
         
         // Also remove /format:webp suffix if present
         result = Regex.Replace(result, @"/format:webp$", "");

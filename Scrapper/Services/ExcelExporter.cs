@@ -5,16 +5,30 @@ namespace Scrapper.Services;
 
 public class ExcelExporter
 {
-    public void ExportToExcel(List<ProductInfo> products, string filePath, bool excludePrice = false, bool useCdnUrls = false)
+    public void ExportToExcel(List<ProductInfo> products, string filePath, bool excludePrice = false, bool useCdnUrls = false, bool requireBarcode = false)
     {
         try
         {
+            // Filter products based on barcode requirement
+            var productsToExport = requireBarcode 
+                ? products.Where(p => !string.IsNullOrWhiteSpace(p.Barcode)).ToList()
+                : products;
+            
+            if (requireBarcode)
+            {
+                var skippedCount = products.Count - productsToExport.Count;
+                if (skippedCount > 0)
+                {
+                    Console.WriteLine($"[Excel] Skipping {skippedCount} products without barcode (requireBarcode=true)");
+                }
+            }
+            
             // EPPlus license already set in Program.cs
             using var package = new ExcelPackage();
             var worksheet = package.Workbook.Worksheets.Add("Products");
 
             // Collect all unique attribute keys
-            var allAttributeKeys = products
+            var allAttributeKeys = productsToExport
                 .SelectMany(p => p.Attributes.Keys)
                 .Distinct()
                 .OrderBy(k => k)
@@ -60,9 +74,9 @@ public class ExcelExporter
             }
 
             // Add data
-            for (int i = 0; i < products.Count; i++)
+            for (int i = 0; i < productsToExport.Count; i++)
             {
-                var product = products[i];
+                var product = productsToExport[i];
                 int row = i + 2;
                 col = 1;
 
@@ -131,13 +145,16 @@ public class ExcelExporter
             }
 
             // Auto-fit columns
-            worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns();
-
-            // Set maximum column width
-            for (int i = 1; i <= totalColumns; i++)
+            if (worksheet.Dimension != null)
             {
-                if (worksheet.Column(i).Width > 50)
-                    worksheet.Column(i).Width = 50;
+                worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns();
+
+                // Set maximum column width
+                for (int i = 1; i <= totalColumns; i++)
+                {
+                    if (worksheet.Column(i).Width > 50)
+                        worksheet.Column(i).Width = 50;
+                }
             }
 
             // Save to file
@@ -145,7 +162,11 @@ public class ExcelExporter
             package.SaveAs(file);
 
             Console.WriteLine($"\n? Excel file saved successfully: {filePath}");
-            Console.WriteLine($"? Total products exported: {products.Count}");
+            Console.WriteLine($"? Total products exported: {productsToExport.Count}");
+            if (requireBarcode && products.Count != productsToExport.Count)
+            {
+                Console.WriteLine($"  Skipped (no barcode): {products.Count - productsToExport.Count}");
+            }
             Console.WriteLine($"? Product features found: {allAttributeKeys.Count}");
             if (!excludePrice)
             {
@@ -157,8 +178,8 @@ public class ExcelExporter
             }
             if (useCdnUrls)
             {
-                var cdnCount = products.Count(p => p.HasCdnImages());
-                Console.WriteLine($"  Image URLs: CDN ({cdnCount}/{products.Count} products with CDN images)");
+                var cdnCount = productsToExport.Count(p => p.HasCdnImages());
+                Console.WriteLine($"  Image URLs: CDN ({cdnCount}/{productsToExport.Count} products with CDN images)");
             }
             else
             {
