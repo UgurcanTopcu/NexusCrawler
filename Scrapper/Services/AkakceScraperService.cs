@@ -13,9 +13,9 @@ public class AkakceScraperService
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _sessions = new();
     private static readonly Random _random = new Random();
     
-    // Minimum delay between products to avoid triggering Cloudflare
-    private const int MIN_DELAY_BETWEEN_PRODUCTS_MS = 3000;
-    private const int MAX_DELAY_BETWEEN_PRODUCTS_MS = 6000;
+    // Minimum delay between products - reduced for faster scraping
+    private const int MIN_DELAY_BETWEEN_PRODUCTS_MS = 2000; // Reduced from 3000
+    private const int MAX_DELAY_BETWEEN_PRODUCTS_MS = 4000; // Reduced from 6000
     
     // Max retries for a single product before skipping
     private const int MAX_PRODUCT_RETRIES = 2;
@@ -36,12 +36,14 @@ public class AkakceScraperService
     /// Process a category URL - extract product URLs then scrape each
     /// </summary>
     /// <param name="startFrom">Start scraping from this product number (1-based index). Products before this will be skipped.</param>
+    /// <param name="scanVariants">Whether to scan all product variants (storage, color options, etc.)</param>
     public async Task ProcessCategoryUrlAsync(
         string categoryUrl,
         int maxProducts,
         Func<int, string, string, Task> onProgress,
         string? sessionId = null,
-        int startFrom = 1)
+        int startFrom = 1,
+        bool scanVariants = false)
     {
         // Create cancellation token for this session
         var cts = new CancellationTokenSource();
@@ -59,6 +61,11 @@ public class AkakceScraperService
             await onProgress(1, "🔍 Starting Akakce category scraper...", "info");
             await onProgress(2, $"🌐 URL: {categoryUrl}", "info");
             await onProgress(3, $"🎯 Target: {maxProducts} products", "info");
+            
+            if (scanVariants)
+            {
+                await onProgress(4, "⚠️ Variant scanning enabled - this will take significantly longer", "info");
+            }
             
             if (startFrom > 1)
             {
@@ -97,10 +104,13 @@ public class AkakceScraperService
             
             await onProgress(15, $"✅ Found {productUrls.Count} total products. Will scrape {urlsToScrape.Count} starting from #{startFrom}", "success");
 
-            // NEW: Wait extra before starting first product to avoid Cloudflare
-            int initialWaitSeconds = Math.Min(20, Math.Max(8, urlsToScrape.Count * 2));
-            await onProgress(18, $"⏳ Waiting {initialWaitSeconds}s before starting product scraping...", "info");
-            await Task.Delay(initialWaitSeconds * 1000);
+            // Only wait if we're scraping many products (potential Cloudflare trigger)
+            if (urlsToScrape.Count > 20)
+            {
+                int initialWaitSeconds = 5;
+                await onProgress(18, $"⏳ Waiting {initialWaitSeconds}s before starting (large batch)...", "info");
+                await Task.Delay(initialWaitSeconds * 1000);
+            }
 
             // Step 2: Scrape each product with significant delays and skip logic
             var progressPerProduct = 75.0 / urlsToScrape.Count;
@@ -141,16 +151,25 @@ public class AkakceScraperService
                 {
                     try
                     {
-                        product = await scraper.ScrapeProductAsync(url);
+                        product = await scraper.ScrapeProductAsync(url, scanVariants);
                         
                         if (product.IsSuccess)
                         {
                             successCount++;
-                            var displayName = !string.IsNullOrEmpty(product.Name) && product.Name.Length > 40
-                                ? product.Name.Substring(0, 40) + "..."
-                                : product.Name ?? "Unknown";
                             
-                            await onProgress((int)currentProgress, $"✅ {displayName} ({product.SellerCount} sellers)", "success");
+                            if (product.HasVariants)
+                            {
+                                var totalSellers = product.Variants.Sum(v => v.SellerCount);
+                                await onProgress((int)currentProgress, $"✅ {product.Name}: {product.Variants.Count} variants, {totalSellers} sellers", "success");
+                            }
+                            else
+                            {
+                                var displayName = !string.IsNullOrEmpty(product.Name) && product.Name.Length > 40
+                                    ? product.Name.Substring(0, 40) + "..."
+                                    : product.Name ?? "Unknown";
+                                
+                                await onProgress((int)currentProgress, $"✅ {displayName} ({product.SellerCount} sellers)", "success");
+                            }
                             productScraped = true;
                         }
                         else
@@ -308,12 +327,14 @@ public class AkakceScraperService
     /// Process an uploaded Excel file with Akakce URLs
     /// </summary>
     /// <param name="startFrom">Start scraping from this row number (1-based index). URLs before this will be skipped.</param>
+    /// <param name="scanVariants">Whether to scan all product variants (storage, color options, etc.)</param>
     public async Task ProcessExcelFileAsync(
         Stream excelStream,
         ScrapeMethod scrapeMethod,
         Func<int, string, string, Task> onProgress,
         string? sessionId = null,
-        int startFrom = 1)
+        int startFrom = 1,
+        bool scanVariants = false)
     {
         // Create cancellation token for this session
         var cts = new CancellationTokenSource();
@@ -331,7 +352,12 @@ public class AkakceScraperService
             // IMPORTANT: Akakce uses Cloudflare protection, so Scrape.do won't work!
             await onProgress(0, "⚠️ Akakce has Cloudflare protection. Using Selenium with delays.", "info");
             await onProgress(1, "Starting Akakce scraper (Selenium)...", "info");
-
+            
+            if (scanVariants)
+            {
+                await onProgress(2, "⚠️ Variant scanning enabled - this will take significantly longer", "info");
+            }
+            
             // Step 1: Read URLs from Excel
             await onProgress(2, "Reading URLs from Excel file...", "info");
             
@@ -419,7 +445,7 @@ public class AkakceScraperService
                 {
                     try
                     {
-                        product = await scraper.ScrapeProductAsync(url);
+                        product = await scraper.ScrapeProductAsync(url, scanVariants);
                         
                         if (product.IsSuccess)
                         {

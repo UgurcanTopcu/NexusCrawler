@@ -20,6 +20,15 @@ public class AkakceExcelExporter
             Console.WriteLine($"\n[Akakce Export] ========== EXPORT START ==========");
             Console.WriteLine($"[Akakce Export] Creating Excel file: {filePath}");
             Console.WriteLine($"[Akakce Export] Products to export: {products.Count}");
+            
+            // Check if any products have variants
+            int productsWithVariants = products.Count(p => p.HasVariants);
+            if (productsWithVariants > 0)
+            {
+                Console.WriteLine($"[Akakce Export] Products with variants: {productsWithVariants}");
+                Console.WriteLine($"[Akakce Export] Total variants: {products.Sum(p => p.Variants.Count)}");
+            }
+            
             Console.WriteLine($"[Akakce Export] Total sellers across all products: {products.Sum(p => p.Sellers.Count)}");
 
             if (products.Count == 0)
@@ -34,6 +43,7 @@ public class AkakceExcelExporter
                 var first = products[0];
                 Console.WriteLine($"[Akakce Export] First product: {first.Name}");
                 Console.WriteLine($"[Akakce Export] First product sellers: {first.Sellers.Count}");
+                Console.WriteLine($"[Akakce Export] First product variants: {first.Variants.Count}");
                 Console.WriteLine($"[Akakce Export] First product URL: {first.ProductUrl}");
             }
 
@@ -44,11 +54,18 @@ public class AkakceExcelExporter
             Console.WriteLine($"[Akakce Export] Creating Products Summary sheet...");
             CreateProductSummarySheet(package, products);
 
-            // Sheet 2: All Sellers (flat list)
+            // Sheet 2: Variants (if any products have variants)
+            if (productsWithVariants > 0)
+            {
+                Console.WriteLine($"[Akakce Export] Creating Variants sheet...");
+                CreateVariantsSheet(package, products);
+            }
+
+            // Sheet 3: All Sellers (flat list)
             Console.WriteLine($"[Akakce Export] Creating All Sellers sheet...");
             CreateSellersSheet(package, products);
 
-            // Sheet 3: Detailed view (one row per seller with product info)
+            // Sheet 4: Detailed view (one row per seller with product info)
             Console.WriteLine($"[Akakce Export] Creating Detailed View sheet...");
             CreateDetailedSheet(package, products);
 
@@ -153,16 +170,97 @@ public class AkakceExcelExporter
         }
     }
 
+    private void CreateVariantsSheet(ExcelPackage package, List<AkakceProductInfo> products)
+    {
+        try
+        {
+            var ws = package.Workbook.Worksheets.Add("Variants");
+
+            // Headers
+            var headers = new[]
+            {
+                "Product ID", "Product Name", "Variant Name", "Variant Options",
+                "Variant URL", "Lowest Price", "Highest Price", "Seller Count",
+                "Scraped At"
+            };
+
+            for (int i = 0; i < headers.Length; i++)
+            {
+                ws.Cells[1, i + 1].Value = headers[i];
+            }
+
+            // Style header
+            using (var range = ws.Cells[1, 1, 1, headers.Length])
+            {
+                range.Style.Font.Bold = true;
+                range.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                range.Style.Fill.BackgroundColor.SetColor(Color.FromArgb(255, 192, 0)); // Orange
+                range.Style.Font.Color.SetColor(Color.White);
+                range.Style.Border.BorderAround(ExcelBorderStyle.Thin);
+            }
+
+            // Data rows
+            int row = 2;
+            int variantCount = 0;
+            foreach (var product in products)
+            {
+                if (product.HasVariants)
+                {
+                    foreach (var variant in product.Variants)
+                    {
+                        ws.Cells[row, 1].Value = product.ProductId;
+                        ws.Cells[row, 2].Value = product.Name;
+                        ws.Cells[row, 3].Value = variant.VariantName;
+                        
+                        // Format options as "Key1: Value1, Key2: Value2"
+                        var optionsStr = string.Join(", ", variant.Options.Select(kv => $"{kv.Key}: {kv.Value}"));
+                        ws.Cells[row, 4].Value = optionsStr;
+                        
+                        ws.Cells[row, 5].Value = variant.VariantUrl;
+                        ws.Cells[row, 6].Value = variant.LowestPrice;
+                        ws.Cells[row, 7].Value = variant.HighestPrice;
+                        ws.Cells[row, 8].Value = variant.SellerCount;
+                        ws.Cells[row, 9].Value = variant.ScrapedAt.ToString("yyyy-MM-dd HH:mm");
+
+                        row++;
+                        variantCount++;
+                    }
+                }
+            }
+
+            // Auto-fit and set max width
+            if (ws.Dimension != null)
+            {
+                ws.Cells[ws.Dimension.Address].AutoFitColumns();
+                for (int i = 1; i <= headers.Length; i++)
+                {
+                    if (ws.Column(i).Width > 60)
+                        ws.Column(i).Width = 60;
+                }
+            }
+
+            // Freeze header row
+            ws.View.FreezePanes(2, 1);
+            
+            Console.WriteLine($"[Akakce Export] Variants: {variantCount} rows created");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Akakce Export] Error in CreateVariantsSheet: {ex.Message}");
+            throw;
+        }
+    }
+
     private void CreateSellersSheet(ExcelPackage package, List<AkakceProductInfo> products)
     {
         try
         {
             var ws = package.Workbook.Worksheets.Add("All Sellers");
 
-            // Headers - added Marketplace column
+            // Headers - added Variant Name column
             var headers = new[]
             {
-                "Product ID", "Product Name", "Rank", "Marketplace", "Seller Name", 
+                "Product ID", "Product Name", "Variant Name", "Rank", "Marketplace", "Seller Name", 
                 "Price", "Price (Numeric)", "Original Price", "Discount",
                 "Shipping", "Free Shipping", "Delivery Time", "Stock Status", "In Stock",
                 "Seller Rating", "Product Link", "Badges", "Notes"
@@ -183,44 +281,91 @@ public class AkakceExcelExporter
                 range.Style.Border.BorderAround(ExcelBorderStyle.Thin);
             }
 
-            // Data rows - flatten all sellers
+            // Data rows - flatten all sellers (including variant sellers)
             int row = 2;
             int sellerCount = 0;
             foreach (var product in products)
             {
-                foreach (var seller in product.Sellers)
+                // If product has variants, export variant sellers
+                if (product.HasVariants)
                 {
-                    ws.Cells[row, 1].Value = product.ProductId;
-                    ws.Cells[row, 2].Value = product.Name;
-                    ws.Cells[row, 3].Value = seller.Rank;
-                    ws.Cells[row, 4].Value = seller.Marketplace; // NEW: Marketplace column
-                    ws.Cells[row, 5].Value = seller.SellerName;  // Actual seller name
-                    ws.Cells[row, 6].Value = seller.PriceFormatted;
-                    ws.Cells[row, 7].Value = seller.Price;
-                    ws.Cells[row, 8].Value = seller.OriginalPrice;
-                    ws.Cells[row, 9].Value = seller.DiscountPercentage;
-                    ws.Cells[row, 10].Value = seller.ShippingCost;
-                    ws.Cells[row, 11].Value = seller.FreeShipping ? "Yes" : "No";
-                    ws.Cells[row, 12].Value = seller.DeliveryTime;
-                    ws.Cells[row, 13].Value = seller.StockStatus;
-                    ws.Cells[row, 14].Value = seller.InStock ? "Yes" : "No";
-                    ws.Cells[row, 15].Value = seller.SellerRating;
-                    ws.Cells[row, 16].Value = seller.ProductLink;
-                    ws.Cells[row, 17].Value = string.Join(", ", seller.Badges);
-                    ws.Cells[row, 18].Value = seller.Notes;
-
-                    // Highlight lowest price (rank 1)
-                    if (seller.Rank == 1)
+                    foreach (var variant in product.Variants)
                     {
-                        using (var rankRange = ws.Cells[row, 1, row, headers.Length])
+                        foreach (var seller in variant.Sellers)
                         {
-                            rankRange.Style.Fill.PatternType = ExcelFillStyle.Solid;
-                            rankRange.Style.Fill.BackgroundColor.SetColor(Color.FromArgb(226, 239, 218));
+                            ws.Cells[row, 1].Value = product.ProductId;
+                            ws.Cells[row, 2].Value = product.Name;
+                            ws.Cells[row, 3].Value = variant.VariantName; // NEW: Variant name
+                            ws.Cells[row, 4].Value = seller.Rank;
+                            ws.Cells[row, 5].Value = seller.Marketplace;
+                            ws.Cells[row, 6].Value = seller.SellerName;
+                            ws.Cells[row, 7].Value = seller.PriceFormatted;
+                            ws.Cells[row, 8].Value = seller.Price;
+                            ws.Cells[row, 9].Value = seller.OriginalPrice;
+                            ws.Cells[row, 10].Value = seller.DiscountPercentage;
+                            ws.Cells[row, 11].Value = seller.ShippingCost;
+                            ws.Cells[row, 12].Value = seller.FreeShipping ? "Yes" : "No";
+                            ws.Cells[row, 13].Value = seller.DeliveryTime;
+                            ws.Cells[row, 14].Value = seller.StockStatus;
+                            ws.Cells[row, 15].Value = seller.InStock ? "Yes" : "No";
+                            ws.Cells[row, 16].Value = seller.SellerRating;
+                            ws.Cells[row, 17].Value = seller.ProductLink;
+                            ws.Cells[row, 18].Value = string.Join(", ", seller.Badges);
+                            ws.Cells[row, 19].Value = seller.Notes;
+
+                            // Highlight lowest price (rank 1)
+                            if (seller.Rank == 1)
+                            {
+                                using (var rankRange = ws.Cells[row, 1, row, headers.Length])
+                                {
+                                    rankRange.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                                    rankRange.Style.Fill.BackgroundColor.SetColor(Color.FromArgb(226, 239, 218));
+                                }
+                            }
+
+                            row++;
+                            sellerCount++;
                         }
                     }
+                }
+                else
+                {
+                    // Export regular product sellers
+                    foreach (var seller in product.Sellers)
+                    {
+                        ws.Cells[row, 1].Value = product.ProductId;
+                        ws.Cells[row, 2].Value = product.Name;
+                        ws.Cells[row, 3].Value = "-"; // No variant
+                        ws.Cells[row, 4].Value = seller.Rank;
+                        ws.Cells[row, 5].Value = seller.Marketplace;
+                        ws.Cells[row, 6].Value = seller.SellerName;
+                        ws.Cells[row, 7].Value = seller.PriceFormatted;
+                        ws.Cells[row, 8].Value = seller.Price;
+                        ws.Cells[row, 9].Value = seller.OriginalPrice;
+                        ws.Cells[row, 10].Value = seller.DiscountPercentage;
+                        ws.Cells[row, 11].Value = seller.ShippingCost;
+                        ws.Cells[row, 12].Value = seller.FreeShipping ? "Yes" : "No";
+                        ws.Cells[row, 13].Value = seller.DeliveryTime;
+                        ws.Cells[row, 14].Value = seller.StockStatus;
+                        ws.Cells[row, 15].Value = seller.InStock ? "Yes" : "No";
+                        ws.Cells[row, 16].Value = seller.SellerRating;
+                        ws.Cells[row, 17].Value = seller.ProductLink;
+                        ws.Cells[row, 18].Value = string.Join(", ", seller.Badges);
+                        ws.Cells[row, 19].Value = seller.Notes;
 
-                    row++;
-                    sellerCount++;
+                        // Highlight lowest price (rank 1)
+                        if (seller.Rank == 1)
+                        {
+                            using (var rankRange = ws.Cells[row, 1, row, headers.Length])
+                            {
+                                rankRange.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                                rankRange.Style.Fill.BackgroundColor.SetColor(Color.FromArgb(226, 239, 218));
+                            }
+                        }
+
+                        row++;
+                        sellerCount++;
+                    }
                 }
             }
 
