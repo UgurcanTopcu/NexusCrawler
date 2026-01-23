@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scrapper - Category Scraper</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body data-theme="purple">
+    <div class="container">
+        <h1>&#128295; Scrapper</h1>
+        <p class="subtitle">Extract product data from e-commerce sites</p>
+        
+        <!-- Navigation Buttons -->
+        <div class="nav-buttons">
+            <div class="nav-btn active" onclick="navigateTo('/')">
+                <h3>&#128722; Category Scraper</h3>
+                <p>Trendyol &amp; Hepsiburada</p>
+            </div>
+            <div class="nav-btn" onclick="navigateTo('/akakce')">
+                <h3>&#128176; Akakce Scraper</h3>
+                <p>Price Comparison</p>
+            </div>
+            <div class="nav-btn" onclick="navigateTo('/bulk-image')">
+                <h3>&#128444;&#65039; Bulk Image Uploader</h3>
+                <p>Process &amp; Upload Images</p>
+            </div>
+        </div>
+        
+        <form id="scraperForm">
+            <div class="form-group">
+                <label for="platform">Platform</label>
+                <select id="platform" name="platform" onchange="updateExample()">
+                    <option value="trendyol">Trendyol</option>
+                    <option value="hepsiburada">Hepsiburada</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="categoryUrl">Category URL</label>
+                <input type="text" id="categoryUrl" name="categoryUrl" 
+                    placeholder="https://www.trendyol.com/yuz-kremi-x-c1122"
+                    value="https://www.trendyol.com/yuz-kremi-x-c1122" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="maxProducts">Maximum Products</label>
+                <input type="number" id="maxProducts" name="maxProducts" min="1" value="20" required>
+                <div class="input-hint">Enter any number - no limit</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="scrapeMethod">Scraping Method</label>
+                <select id="scrapeMethod" name="scrapeMethod">
+                    <option value="Selenium">Selenium (Free)</option>
+                    <option value="ScrapeDo">Scrape.do API (Faster)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="template">Export Template</label>
+                <select id="template" name="template">
+                    <option value="">Default (No Template)</option>
+                    <option value="trendyol_kettle">Trendyol Kettle (MediaMarkt)</option>
+                    <option value="trendyol_laptop">Trendyol Laptop (MediaMarkt)</option>
+                    <option value="trendyol_robot_vacuum">Trendyol Robot Vacuum (MediaMarkt)</option>
+                    <option value="trendyol_dryer">Trendyol Dryer (MediaMarkt)</option>
+                    <option value="trendyol_klima">Trendyol Klima (MediaMarkt)</option>
+                    <option value="trendyol_water_heater">Trendyol Sofben (MediaMarkt)</option>
+                    <option value="trendyol_cordless_vacuum_cleaner">Trendyol Cordless Vacuum Cleaner (MediaMarkt)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <div class="checkbox-label">
+                    <input type="checkbox" id="excludePrice" name="excludePrice">
+                    <label for="excludePrice">Exclude Price from Excel</label>
+                </div>
+                <div class="checkbox-label">
+                    <input type="checkbox" id="processImages" name="processImages" checked>
+                    <label for="processImages">Process &amp; Upload Images to CDN</label>
+                </div>
+            </div>
+            
+            <div class="example" id="exampleUrls">
+                <strong>Example URLs:</strong><br>
+                - Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122<br>
+                - Skincare: https://www.trendyol.com/cilt-bakimi-x-c1121
+            </div>
+            
+            <div class="button-group">
+                <button type="submit" id="startBtn" class="btn-primary">Start Scraping</button>
+                <button type="button" id="stopBtn" class="btn-stop" onclick="handleStop()">Stop</button>
+                <button type="button" id="resetBtn" class="btn-reset" onclick="handleReset()">Reset</button>
+            </div>
+        </form>
+        
+        <div id="progress">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+            <div id="status"></div>
+        </div>
+    </div>
+    
+    <script src="/js/scraper-common.js"></script>
+    <script>
+        function updateExample() {
+            const platform = document.getElementById('platform').value;
+            const exampleUrls = document.getElementById('exampleUrls');
+            const categoryUrl = document.getElementById('categoryUrl');
+            
+            if (platform === 'hepsiburada') {
+                exampleUrls.innerHTML = '<strong>Example URLs (Hepsiburada):</strong><br>- Tablets: https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849';
+                categoryUrl.value = 'https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849';
+            } else {
+                exampleUrls.innerHTML = '<strong>Example URLs (Trendyol):</strong><br>- Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122';
+                categoryUrl.value = 'https://www.trendyol.com/yuz-kremi-x-c1122';
+            }
+        }
+        
+        function handleReset() {
+            if (getIsRunning()) {
+                handleStop();
+            }
+            document.getElementById('scraperForm').reset();
+            resetProgressUI();
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').textContent = 'Start Scraping';
+            document.getElementById('stopBtn').style.display = 'none';
+            updateExample();
+        }
+        
+        async function handleStop() {
+            await stopOperation('/api/stop/');
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').textContent = 'Start Scraping';
+            document.getElementById('stopBtn').style.display = 'none';
+            addStatusMessage('Scraping stopped by user. Check for partial results below.', 'warning');
+        }
+        
+        document.getElementById('scraperForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const platform = document.getElementById('platform').value;
+            const categoryUrl = document.getElementById('categoryUrl').value;
+            const maxProducts = document.getElementById('maxProducts').value;
+            const excludePrice = document.getElementById('excludePrice').checked;
+            const processImages = document.getElementById('processImages').checked;
+            const scrapeMethod = document.getElementById('scrapeMethod').value;
+            const templateName = document.getElementById('template').value;
+            
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('startBtn').textContent = 'Scraping...';
+            document.getElementById('stopBtn').style.display = 'block';
+            showProgress(true);
+            document.getElementById('status').innerHTML = '<div class="status-item">Starting scraper...</div>';
+            
+            await startSseStream('/api/scrape', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    platform,
+                    categoryUrl,
+                    maxProducts: parseInt(maxProducts),
+                    excludePrice,
+                    processImages,
+                    scrapeMethod,
+                    templateName: templateName || null,
+                    sessionId: getSessionId()
+                })
+            }, {
+                onProgress: updateProgressBar,
+                onMessage: addStatusMessage,
+                onDownload: (url, fileName) => {
+                    const status = document.getElementById('status');
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.className = 'download-link';
+                    link.textContent = 'Download Excel File';
+                    link.download = fileName;
+                    status.insertBefore(link, status.firstChild);
+                },
+                onComplete: () => {
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('startBtn').textContent = 'Start Scraping';
+                    document.getElementById('stopBtn').style.display = 'none';
+                },
+                onError: (message) => {
+                    document.getElementById('status').innerHTML = '<div class="status-item error">Error: ' + message + '</div>';
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('startBtn').textContent = 'Start Scraping';
+                    document.getElementById('stopBtn').style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

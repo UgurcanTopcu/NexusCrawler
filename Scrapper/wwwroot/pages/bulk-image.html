@@ -1,0 +1,149 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulk Image Uploader</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body data-theme="green">
+    <div class="container">
+        <h1>&#128444;&#65039; Bulk Image Uploader</h1>
+        <p class="subtitle">Process and upload multiple images to CDN</p>
+        
+        <div class="nav-buttons">
+            <div class="nav-btn" onclick="navigateTo('/')">
+                <h3>&#128722; Category Scraper</h3>
+                <p>Trendyol &amp; Hepsiburada</p>
+            </div>
+            <div class="nav-btn" onclick="navigateTo('/akakce')">
+                <h3>&#128176; Akakce Scraper</h3>
+                <p>Price Comparison</p>
+            </div>
+            <div class="nav-btn active">
+                <h3>&#128444;&#65039; Bulk Image Uploader</h3>
+                <p>Process &amp; Upload Images</p>
+            </div>
+        </div>
+        
+        <form id="bulkImageForm">
+            <div class="form-group">
+                <label>Upload Excel File with Image URLs</label>
+                <div class="file-upload" id="dropZone">
+                    <input type="file" id="excelFile" accept=".xlsx,.xls">
+                    <div class="icon">&#128193;</div>
+                    <div class="text">
+                        <strong>Click to upload</strong> or drag and drop<br>
+                        Excel file (.xlsx, .xls)
+                    </div>
+                    <div class="filename" id="fileName"></div>
+                </div>
+            </div>
+            
+            <div class="info-box">
+                <strong>Excel File Format:</strong>
+                <ul>
+                    <li>Supports MULTIPLE columns with image URLs</li>
+                    <li>Automatically detects image URLs in ANY column</li>
+                    <li>Non-image columns are preserved EXACTLY as they are</li>
+                    <li>Supports jpg, jpeg, png, gif, webp formats</li>
+                    <li>Images will be downloaded, resized to 1000x1000, and uploaded to CDN</li>
+                    <li>Example: Column A = Product Name, Column B = Image 1, Column C = Price, Column D = Image 2</li>
+                </ul>
+            </div>
+            
+            <div class="info-box">
+                <strong>Processing Steps:</strong>
+                <ul>
+                    <li>Scans ALL columns and identifies image URLs automatically</li>
+                    <li>Downloads images from identified URL columns</li>
+                    <li>Adds watermark and resizes to 1000x1000px</li>
+                    <li>Uploads processed images to FTP/CDN</li>
+                    <li>Replaces image URLs with CDN URLs (green highlight)</li>
+                    <li>Preserves all other columns without any changes (white background)</li>
+                    <li>Generates summary report showing which columns were processed</li>
+                </ul>
+            </div>
+            
+            <div class="button-group">
+                <button type="submit" id="uploadBtn" class="btn-primary" disabled>Start Processing</button>
+                <button type="button" id="stopBtn" class="btn-stop" onclick="handleStop()">Stop</button>
+                <button type="button" id="resetBtn" class="btn-reset" onclick="handleReset()">Reset</button>
+            </div>
+        </form>
+        
+        <div id="progress">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+            <div id="status"></div>
+        </div>
+    </div>
+    
+    <script src="/js/scraper-common.js"></script>
+    <script>
+        let selectedFile = null;
+        
+        // Setup file upload
+        setupFileUpload('dropZone', 'excelFile', 'fileName', (file) => {
+            selectedFile = file;
+            document.getElementById('uploadBtn').disabled = false;
+        });
+        
+        function handleReset() {
+            if (getIsRunning()) handleStop();
+            selectedFile = null;
+            document.getElementById('excelFile').value = '';
+            document.getElementById('fileName').textContent = '';
+            document.getElementById('uploadBtn').disabled = true;
+            document.getElementById('uploadBtn').textContent = 'Start Processing';
+            document.getElementById('stopBtn').style.display = 'none';
+            resetProgressUI();
+        }
+        
+        async function handleStop() {
+            await stopOperation('/api/bulk-image/stop/');
+            document.getElementById('uploadBtn').disabled = false;
+            document.getElementById('uploadBtn').textContent = 'Start Processing';
+            document.getElementById('stopBtn').style.display = 'none';
+            addStatusMessage('Processing stopped. Check for partial results below.', 'warning');
+        }
+        
+        document.getElementById('bulkImageForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!selectedFile) return;
+            
+            document.getElementById('uploadBtn').disabled = true;
+            document.getElementById('uploadBtn').textContent = 'Processing...';
+            document.getElementById('stopBtn').style.display = 'block';
+            showProgress(true);
+            document.getElementById('status').innerHTML = '<div class="status-item">Starting image processing...</div>';
+            
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('sessionId', getSessionId() || Date.now().toString());
+            
+            await startSseStream('/api/bulk-image/process', {
+                method: 'POST',
+                body: formData
+            }, {
+                onProgress: updateProgressBar,
+                onMessage: addStatusMessage,
+                onDownload: addDownloadLink,
+                onComplete: () => {
+                    document.getElementById('uploadBtn').disabled = false;
+                    document.getElementById('uploadBtn').textContent = 'Start Processing';
+                    document.getElementById('stopBtn').style.display = 'none';
+                },
+                onError: (message) => {
+                    document.getElementById('status').innerHTML = '<div class="status-item error">Error: ' + message + '</div>';
+                    document.getElementById('uploadBtn').disabled = false;
+                    document.getElementById('uploadBtn').textContent = 'Start Processing';
+                    document.getElementById('stopBtn').style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

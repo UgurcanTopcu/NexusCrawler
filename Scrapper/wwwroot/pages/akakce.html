@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akakce Scraper - Price Comparison</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body data-theme="pink">
+    <div class="container">
+        <h1>&#128176; Akakce Scraper</h1>
+        <p class="subtitle">Compare prices across multiple sellers from Akakce</p>
+        
+        <div class="nav-buttons">
+            <div class="nav-btn" onclick="navigateTo('/')">
+                <h3>&#128722; Category Scraper</h3>
+                <p>Trendyol &amp; Hepsiburada</p>
+            </div>
+            <div class="nav-btn active">
+                <h3>&#128176; Akakce Scraper</h3>
+                <p>Price Comparison</p>
+            </div>
+            <div class="nav-btn" onclick="navigateTo('/bulk-image')">
+                <h3>&#128444;&#65039; Bulk Image Uploader</h3>
+                <p>Process &amp; Upload Images</p>
+            </div>
+        </div>
+        
+        <form id="akakceForm">
+            <!-- Input Mode Toggle -->
+            <div class="mode-toggle">
+                <div class="mode-btn active" onclick="setMode('url')" id="modeUrl">Category URL</div>
+                <div class="mode-btn" onclick="setMode('file')" id="modeFile">Excel File</div>
+            </div>
+            
+            <!-- URL Input Section -->
+            <div class="input-section active" id="urlSection">
+                <div class="form-group">
+                    <label for="categoryUrl">Akakce Category URL</label>
+                    <input type="text" id="categoryUrl" 
+                        placeholder="https://www.akakce.com/laptop-notebook.html"
+                        value="https://www.akakce.com/laptop-notebook.html">
+                    <div class="input-hint">Enter an Akakce category page URL to scrape all products</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="maxProducts">Maximum Products</label>
+                    <input type="number" id="maxProducts" min="1" value="20">
+                    <div class="input-hint">Enter any number - no limit</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="startFrom">Start From</label>
+                    <input type="number" id="startFrom" min="1" value="1">
+                    <div class="input-hint">Start scraping from this product number</div>
+                </div>
+                
+                <div class="form-group">
+                    <div class="checkbox-label">
+                        <input type="checkbox" id="scanVariants" name="scanVariants">
+                        <label for="scanVariants">Scan All Product Variants (Storage, Color, etc.)</label>
+                    </div>
+                    <div class="input-hint">Warning: Increases scraping time significantly</div>
+                </div>
+                
+                <div class="example">
+                    <strong>Example Category URLs:</strong><br>
+                    - Laptops: https://www.akakce.com/laptop-notebook.html<br>
+                    - Phones: https://www.akakce.com/cep-telefonu.html<br>
+                    - TVs: https://www.akakce.com/televizyon.html
+                </div>
+            </div>
+            
+            <!-- File Upload Section -->
+            <div class="input-section" id="fileSection">
+                <div class="form-group">
+                    <label>Upload Excel File with Akakce Product URLs</label>
+                    <div class="file-upload" id="dropZone">
+                        <input type="file" id="excelFile" accept=".xlsx,.xls">
+                        <div class="icon">&#128193;</div>
+                        <div class="text">
+                            <strong>Click to upload</strong> or drag and drop<br>
+                            Excel file (.xlsx, .xls)
+                        </div>
+                        <div class="filename" id="fileName"></div>
+                    </div>
+                    <div class="input-hint">Excel should have Akakce product URLs in the first column</div>
+                </div>
+                
+                <div class="form-group">
+                    <div class="checkbox-label">
+                        <input type="checkbox" id="scanVariantsFile" name="scanVariantsFile">
+                        <label for="scanVariantsFile">Scan All Product Variants (Storage, Color, etc.)</label>
+                    </div>
+                    <div class="input-hint">Warning: Increases scraping time significantly</div>
+                </div>
+                
+                <div class="example">
+                    <strong>Expected Excel Format:</strong><br>
+                    Column A should contain product URLs like:<br>
+                    - https://www.akakce.com/cep-telefonu/en-ucuz-samsung-galaxy-s25-ultra-fiyati,917781807.html
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button type="submit" id="akakceStartBtn" class="btn-primary">Start Scraping</button>
+                <button type="button" id="akakceStopBtn" class="btn-stop" onclick="handleStop()">Stop</button>
+                <button type="button" id="akakceResetBtn" class="btn-reset" onclick="handleReset()">Reset</button>
+            </div>
+        </form>
+        
+        <div id="progress">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+            <div id="status"></div>
+        </div>
+    </div>
+    
+    <script src="/js/scraper-common.js"></script>
+    <script>
+        let currentMode = 'url';
+        let selectedFile = null;
+        
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('modeUrl').classList.toggle('active', mode === 'url');
+            document.getElementById('modeFile').classList.toggle('active', mode === 'file');
+            document.getElementById('urlSection').classList.toggle('active', mode === 'url');
+            document.getElementById('fileSection').classList.toggle('active', mode === 'file');
+            
+            if (mode === 'url') {
+                document.getElementById('akakceStartBtn').disabled = false;
+            } else {
+                document.getElementById('akakceStartBtn').disabled = !selectedFile;
+            }
+        }
+        
+        // Setup file upload
+        setupFileUpload('dropZone', 'excelFile', 'fileName', (file) => {
+            selectedFile = file;
+            if (currentMode === 'file') {
+                document.getElementById('akakceStartBtn').disabled = false;
+            }
+        });
+        
+        function handleReset() {
+            if (getIsRunning()) handleStop();
+            selectedFile = null;
+            document.getElementById('excelFile').value = '';
+            document.getElementById('fileName').textContent = '';
+            document.getElementById('categoryUrl').value = 'https://www.akakce.com/laptop-notebook.html';
+            document.getElementById('maxProducts').value = '20';
+            document.getElementById('startFrom').value = '1';
+            document.getElementById('akakceStartBtn').disabled = false;
+            document.getElementById('akakceStartBtn').textContent = 'Start Scraping';
+            document.getElementById('akakceStopBtn').style.display = 'none';
+            resetProgressUI();
+            setMode('url');
+        }
+        
+        async function handleStop() {
+            await stopOperation('/api/akakce/stop/');
+            document.getElementById('akakceStartBtn').disabled = false;
+            document.getElementById('akakceStartBtn').textContent = 'Start Scraping';
+            document.getElementById('akakceStopBtn').style.display = 'none';
+            addStatusMessage('Scraping stopped. Check for partial results below.', 'warning');
+        }
+        
+        document.getElementById('akakceForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            document.getElementById('akakceStartBtn').disabled = true;
+            document.getElementById('akakceStartBtn').textContent = 'Processing...';
+            document.getElementById('akakceStopBtn').style.display = 'block';
+            showProgress(true);
+            document.getElementById('status').innerHTML = '<div class="status-item">Starting...</div>';
+            
+            let url, options;
+            
+            if (currentMode === 'url') {
+                const categoryUrl = document.getElementById('categoryUrl').value;
+                const maxProducts = document.getElementById('maxProducts').value;
+                const startFrom = document.getElementById('startFrom').value;
+                const scanVariants = document.getElementById('scanVariants').checked;
+                
+                url = '/api/akakce/scrape-category';
+                options = {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        categoryUrl: categoryUrl,
+                        maxProducts: parseInt(maxProducts),
+                        sessionId: getSessionId(),
+                        startFrom: parseInt(startFrom),
+                        scanVariants: scanVariants
+                    })
+                };
+            } else {
+                if (!selectedFile) return;
+                
+                const scanVariants = document.getElementById('scanVariantsFile').checked;
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                formData.append('scrapeMethod', 'Selenium');
+                formData.append('sessionId', getSessionId() || Date.now().toString());
+                formData.append('scanVariants', scanVariants.toString());
+                
+                url = '/api/akakce/scrape';
+                options = {
+                    method: 'POST',
+                    body: formData
+                };
+            }
+            
+            await startSseStream(url, options, {
+                onProgress: updateProgressBar,
+                onMessage: addStatusMessage,
+                onDownload: addDownloadLink,
+                onComplete: () => {
+                    document.getElementById('akakceStartBtn').disabled = false;
+                    document.getElementById('akakceStartBtn').textContent = 'Start Scraping';
+                    document.getElementById('akakceStopBtn').style.display = 'none';
+                },
+                onError: (message) => {
+                    document.getElementById('status').innerHTML = '<div class="status-item error">Error: ' + message + '</div>';
+                    document.getElementById('akakceStartBtn').disabled = false;
+                    document.getElementById('akakceStartBtn').textContent = 'Start Scraping';
+                    document.getElementById('akakceStopBtn').style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

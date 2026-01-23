@@ -1,0 +1,478 @@
+/* Scrapper - Shared Styles */
+
+/* Reset and Base */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+/* Theme Colors - Override with data-theme attribute */
+body[data-theme="purple"] {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+body[data-theme="pink"] {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+body[data-theme="green"] {
+    background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+}
+
+/* Container */
+.container {
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    max-width: 800px;
+    width: 100%;
+    padding: 40px;
+}
+
+/* Typography */
+h1 {
+    color: #333;
+    margin-bottom: 10px;
+    font-size: 2.5em;
+}
+
+.subtitle {
+    color: #666;
+    margin-bottom: 30px;
+    font-size: 1.1em;
+}
+
+/* Navigation Buttons */
+.nav-buttons {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+
+.nav-btn {
+    flex: 1;
+    min-width: 180px;
+    padding: 20px;
+    border: 2px solid currentColor;
+    border-radius: 12px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.3s;
+    text-align: center;
+}
+
+.nav-btn h3 {
+    margin-bottom: 5px;
+    font-size: 1em;
+}
+
+.nav-btn p {
+    font-size: 0.85em;
+    opacity: 0.8;
+}
+
+/* Theme-specific nav button colors */
+body[data-theme="purple"] .nav-btn {
+    border-color: #667eea;
+}
+
+body[data-theme="purple"] .nav-btn:hover {
+    background: #667eea;
+    color: white;
+}
+
+body[data-theme="purple"] .nav-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: transparent;
+}
+
+body[data-theme="pink"] .nav-btn {
+    border-color: #f5576c;
+}
+
+body[data-theme="pink"] .nav-btn:hover {
+    background: #f5576c;
+    color: white;
+}
+
+body[data-theme="pink"] .nav-btn.active {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+    border-color: transparent;
+}
+
+body[data-theme="green"] .nav-btn {
+    border-color: #43e97b;
+}
+
+body[data-theme="green"] .nav-btn:hover {
+    background: #43e97b;
+    color: white;
+}
+
+body[data-theme="green"] .nav-btn.active {
+    background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+    color: white;
+    border-color: transparent;
+}
+
+/* Form Elements */
+.form-group {
+    margin-bottom: 25px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    color: #555;
+    font-weight: 600;
+    font-size: 0.95em;
+}
+
+input[type="text"],
+input[type="number"],
+select {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: all 0.3s;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+select:focus {
+    outline: none;
+    border-color: var(--theme-color, #667eea);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+body[data-theme="pink"] input:focus,
+body[data-theme="pink"] select:focus {
+    border-color: #f5576c;
+    box-shadow: 0 0 0 3px rgba(245, 87, 108, 0.1);
+}
+
+body[data-theme="green"] input:focus,
+body[data-theme="green"] select:focus {
+    border-color: #43e97b;
+    box-shadow: 0 0 0 3px rgba(67, 233, 123, 0.1);
+}
+
+.input-hint {
+    font-size: 0.85em;
+    color: #999;
+    margin-top: 5px;
+}
+
+/* Checkbox */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.checkbox-label input {
+    width: auto;
+    margin-right: 8px;
+    cursor: pointer;
+}
+
+.checkbox-label label {
+    margin: 0;
+    cursor: pointer;
+    font-weight: normal;
+}
+
+/* Buttons */
+.button-group {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+button {
+    padding: 15px 40px;
+    font-size: 1.1em;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    border: none;
+}
+
+button:hover:not(:disabled) {
+    transform: translateY(-2px);
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    color: white;
+    flex: 2;
+}
+
+body[data-theme="purple"] .btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+body[data-theme="purple"] .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+}
+
+body[data-theme="pink"] .btn-primary {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+body[data-theme="pink"] .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(245, 87, 108, 0.3);
+}
+
+body[data-theme="green"] .btn-primary {
+    background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+}
+
+body[data-theme="green"] .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(67, 233, 123, 0.3);
+}
+
+.btn-stop {
+    background: #f44336;
+    color: white;
+    flex: 1;
+    display: none;
+}
+
+.btn-stop:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(244, 67, 54, 0.3);
+}
+
+.btn-reset {
+    background: #757575;
+    color: white;
+    flex: 1;
+}
+
+.btn-reset:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(117, 117, 117, 0.3);
+}
+
+/* Progress */
+#progress {
+    margin-top: 30px;
+    display: none;
+}
+
+.progress-bar {
+    background: #f0f0f0;
+    border-radius: 10px;
+    height: 30px;
+    overflow: hidden;
+    margin-bottom: 15px;
+}
+
+.progress-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+}
+
+body[data-theme="purple"] .progress-fill {
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+}
+
+body[data-theme="pink"] .progress-fill {
+    background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
+}
+
+body[data-theme="green"] .progress-fill {
+    background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%);
+}
+
+/* Status */
+#status {
+    color: #555;
+    font-size: 0.95em;
+    line-height: 1.6;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.status-item {
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.status-item:last-child {
+    border-bottom: none;
+}
+
+.status-item.success {
+    color: #4CAF50;
+    font-weight: 600;
+}
+
+.status-item.error {
+    color: #f44336;
+    font-weight: 600;
+}
+
+.status-item.warning {
+    color: #ff9800;
+    font-weight: 600;
+}
+
+/* Download Link */
+.download-link {
+    display: inline-block;
+    background: #4CAF50;
+    color: white;
+    padding: 12px 30px;
+    text-decoration: none;
+    border-radius: 8px;
+    margin-top: 15px;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.download-link:hover {
+    background: #45a049;
+    transform: translateY(-2px);
+}
+
+/* Example/Info Boxes */
+.example,
+.info-box {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    margin: 15px 0;
+    font-size: 0.9em;
+}
+
+body[data-theme="purple"] .example strong,
+body[data-theme="purple"] .info-box strong {
+    color: #667eea;
+}
+
+body[data-theme="pink"] .example strong,
+body[data-theme="pink"] .info-box strong {
+    color: #f5576c;
+}
+
+body[data-theme="green"] .example strong,
+body[data-theme="green"] .info-box strong {
+    color: #43e97b;
+}
+
+.info-box ul {
+    margin: 10px 0 0 20px;
+}
+
+/* Mode Toggle */
+.mode-toggle {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.mode-btn {
+    flex: 1;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.3s;
+    font-weight: 600;
+}
+
+body[data-theme="pink"] .mode-btn:hover {
+    border-color: #f5576c;
+}
+
+body[data-theme="pink"] .mode-btn.active {
+    background: #f5576c;
+    color: white;
+    border-color: #f5576c;
+}
+
+/* File Upload */
+.file-upload {
+    border: 3px dashed #ddd;
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: #fafafa;
+}
+
+body[data-theme="pink"] .file-upload:hover,
+body[data-theme="pink"] .file-upload.dragover {
+    border-color: #f5576c;
+    background: #fff5f6;
+}
+
+body[data-theme="green"] .file-upload:hover,
+body[data-theme="green"] .file-upload.dragover {
+    border-color: #43e97b;
+    background: #f0fff8;
+}
+
+.file-upload input {
+    display: none;
+}
+
+.file-upload .icon {
+    font-size: 3em;
+    margin-bottom: 15px;
+}
+
+.file-upload .text {
+    color: #666;
+}
+
+.file-upload .filename {
+    font-weight: 600;
+    margin-top: 10px;
+}
+
+body[data-theme="pink"] .file-upload .filename {
+    color: #f5576c;
+}
+
+body[data-theme="green"] .file-upload .filename {
+    color: #43e97b;
+}
+
+/* Input Sections */
+.input-section {
+    display: none;
+}
+
+.input-section.active {
+    display: block;
+}
