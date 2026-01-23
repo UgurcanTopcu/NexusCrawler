@@ -548,6 +548,62 @@ public class HepsiburadaScraper : IDisposable
             }
             catch { }
             
+            // EXTRACT CATEGORY HIERARCHY from utagData script
+            // This is critical for grouping products by category in Excel export
+            try
+            {
+                var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'utagData')]");
+                if (scriptNodes != null)
+                {
+                    foreach (var scriptNode in scriptNodes)
+                    {
+                        var scriptText = scriptNode.InnerText;
+                        
+                        // Extract category_id_hierarchy: "2147483637 > 235604 > 234329"
+                        var categoryIdMatch = Regex.Match(scriptText, @"""category_id_hierarchy""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                        if (categoryIdMatch.Success)
+                        {
+                            product.CategoryIdHierarchy = categoryIdMatch.Groups[1].Value.Trim();
+                            Console.WriteLine($"[Hepsiburada] Category ID Hierarchy: {product.CategoryIdHierarchy}");
+                        }
+                        
+                        // Extract category_name_hierarchy: "Beyaz Esya / Mutfak > Beyaz Esya & Ankastre > Ankastre Setler"
+                        var categoryNameMatch = Regex.Match(scriptText, @"""category_name_hierarchy""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                        if (categoryNameMatch.Success)
+                        {
+                            product.CategoryNameHierarchy = categoryNameMatch.Groups[1].Value.Trim();
+                            Console.WriteLine($"[Hepsiburada] Category Name Hierarchy: {product.CategoryNameHierarchy}");
+                        }
+                        
+                        // Also try to extract barcode from utagData if not found elsewhere
+                        if (string.IsNullOrEmpty(product.Barcode))
+                        {
+                            var barcodeMatch = Regex.Match(scriptText, @"""product_barcode""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                            if (barcodeMatch.Success && !string.IsNullOrWhiteSpace(barcodeMatch.Groups[1].Value))
+                            {
+                                product.Barcode = barcodeMatch.Groups[1].Value.Trim();
+                            }
+                        }
+                        
+                        // Extract brand from utagData if not found
+                        if (string.IsNullOrEmpty(product.Brand))
+                        {
+                            var brandMatch = Regex.Match(scriptText, @"""product_brand""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                            if (brandMatch.Success)
+                            {
+                                product.Brand = brandMatch.Groups[1].Value.Trim();
+                            }
+                        }
+                        
+                        break; // Found utagData script, no need to continue
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Hepsiburada] Warning: Could not extract category hierarchy: {ex.Message}");
+            }
+            
             // EXTRACT PRODUCT NAME
             try
             {
@@ -739,25 +795,6 @@ public class HepsiburadaScraper : IDisposable
                     for (int i = 1; i < allImages.Count; i++)
                     {
                         product.AdditionalImages.Add(allImages[i]);
-                    }
-                }
-            }
-            catch { }
-
-            // EXTRACT CATEGORY
-            try
-            {
-                var breadcrumbNodes = htmlDoc.DocumentNode.SelectNodes("//ol[contains(@class, 'breadcrumb')]//a");
-                if (breadcrumbNodes != null && breadcrumbNodes.Count > 0)
-                {
-                    var categories = breadcrumbNodes
-                        .Select(n => n.InnerText.Trim())
-                        .Where(s => !string.IsNullOrWhiteSpace(s) && s != "Ana Sayfa")
-                        .ToList();
-                    
-                    if (categories.Count > 0)
-                    {
-                        product.Category = string.Join(" > ", categories);
                     }
                 }
             }

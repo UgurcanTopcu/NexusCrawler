@@ -35,6 +35,7 @@ public class HepsiburadaScraperService
         var cancellationToken = cts.Token;
         
         var products = new List<ProductInfo>();
+        int skippedNoBarcodeCount = 0;
         
         try
         {
@@ -76,11 +77,11 @@ public class HepsiburadaScraperService
                 cdnCache = new CdnCacheService(ftpConfig);
                 imageService = new ImageProcessingService(httpClient, ftpService, cdnCache);
                 
-                await onProgress(8, "?? Loading CDN cache...", "info");
+                await onProgress(8, "Loading CDN cache...", "info");
                 await imageService.InitializeCacheAsync();
                 
                 var (siteCount, productCount) = cdnCache.GetCacheStats();
-                await onProgress(9, $"? CDN cache ready: {productCount} products", "info");
+                await onProgress(9, $"CDN cache ready: {productCount} products", "info");
             }
             
             // Process each product
@@ -89,7 +90,7 @@ public class HepsiburadaScraperService
                 // Check for cancellation
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    await onProgress((int)currentProgress, $"?? Stopped at product {i}/{linksToProcess.Count}", "warning");
+                    await onProgress((int)currentProgress, $"Stopped at product {i}/{linksToProcess.Count}", "warning");
                     break;
                 }
                 
@@ -99,11 +100,24 @@ public class HepsiburadaScraperService
                 var product = await scraper.GetProductDetailsAsync(link);
                 if (product != null)
                 {
-                    var displayName = !string.IsNullOrEmpty(product.Name) && product.Name.Length > 50 
+                    // Check if product has barcode - skip if not
+                    if (string.IsNullOrWhiteSpace(product.Barcode))
+                    {
+                        skippedNoBarcodeCount++;
+                        var displayName = !string.IsNullOrEmpty(product.Name) && product.Name.Length > 40 
+                            ? product.Name.Substring(0, 40) + "..." 
+                            : product.Name ?? "Unknown";
+                        await onProgress((int)currentProgress, $"Skipped (no barcode): {displayName}", "warning");
+                        currentProgress += progressPerProduct;
+                        await Task.Delay(100);
+                        continue;
+                    }
+                    
+                    var displayNameSuccess = !string.IsNullOrEmpty(product.Name) && product.Name.Length > 50 
                         ? product.Name.Substring(0, 50) + "..." 
                         : product.Name ?? "Unknown Product";
                     
-                    await onProgress((int)currentProgress, $"? {displayName}", "success");
+                    await onProgress((int)currentProgress, $"Scraped: {displayNameSuccess}", "success");
                     
                     // Process images
                     if (processImages && imageService != null && !cancellationToken.IsCancellationRequested)
@@ -120,11 +134,11 @@ public class HepsiburadaScraperService
                             product.CdnAdditionalImages = additionalImages;
                             
                             var imageCount = (string.IsNullOrEmpty(mainImage) ? 0 : 1) + additionalImages.Count;
-                            await onProgress((int)currentProgress, $"? Uploaded {imageCount} images", "success");
+                            await onProgress((int)currentProgress, $"Uploaded {imageCount} images", "success");
                         }
                         catch (Exception imgEx)
                         {
-                            await onProgress((int)currentProgress, $"? Image error: {imgEx.Message}", "error");
+                            await onProgress((int)currentProgress, $"Image error: {imgEx.Message}", "error");
                         }
                     }
                     
@@ -143,7 +157,8 @@ public class HepsiburadaScraperService
             {
                 var finalProgress = 90;
                 var stoppedText = cancellationToken.IsCancellationRequested ? " (stopped early)" : "";
-                await onProgress(finalProgress, $"Scraped {products.Count} products{stoppedText}. Creating Excel...", "info");
+                var skippedText = skippedNoBarcodeCount > 0 ? $" ({skippedNoBarcodeCount} skipped - no barcode)" : "";
+                await onProgress(finalProgress, $"Scraped {products.Count} products{stoppedText}{skippedText}. Creating Excel...", "info");
                 
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
                 var fileName = $"HepsiburadaProducts_{timestamp}.xlsx";
@@ -151,21 +166,52 @@ public class HepsiburadaScraperService
                 
                 try
                 {
-                    var exporter = new ExcelExporter();
-                    exporter.ExportToExcel(products, filePath, excludePrice, processImages);
+                    // Check if products have category hierarchy (for multi-sheet export)
+                    var hasCategories = products.Any(p => !string.IsNullOrEmpty(p.CategoryIdHierarchy));
+                    var uniqueCategories = products
+                        .Where(p => !string.IsNullOrEmpty(p.CategoryIdHierarchy))
+                        .Select(p => p.GetLeafCategoryId())
+                        .Distinct()
+                        .Count();
                     
-                    await onProgress(100, $"? Exported {products.Count} products!", "success");
+                    if (hasCategories && uniqueCategories > 1)
+                    {
+                        // Use category-based exporter for multiple categories
+                        await onProgress(92, $"Creating Excel with {uniqueCategories} category sheets...", "info");
+                        var categoryExporter = new ExcelExporterWithCategories();
+                        categoryExporter.ExportToExcel(products, filePath, excludePrice, processImages);
+                        
+                        var successMsg = $"Exported {products.Count} products in {uniqueCategories} category sheets!";
+                        if (skippedNoBarcodeCount > 0)
+                            successMsg += $" ({skippedNoBarcodeCount} skipped - no barcode)";
+                        await onProgress(100, successMsg, "success");
+                    }
+                    else
+                    {
+                        // Use standard exporter for single category or no categories
+                        var exporter = new ExcelExporter();
+                        exporter.ExportToExcel(products, filePath, excludePrice, processImages);
+                        
+                        var successMsg = $"Exported {products.Count} products!";
+                        if (skippedNoBarcodeCount > 0)
+                            successMsg += $" ({skippedNoBarcodeCount} skipped - no barcode)";
+                        await onProgress(100, successMsg, "success");
+                    }
+                    
                     await SendComplete(onProgress, fileName, products.Count);
                 }
                 catch (Exception excelEx)
                 {
-                    await onProgress(100, $"? Excel error: {excelEx.Message}", "error");
+                    await onProgress(100, $"Excel error: {excelEx.Message}", "error");
                     await SendComplete(onProgress, null, null);
                 }
             }
             else
             {
-                await onProgress(100, "No products scraped", "error");
+                var noProductsMsg = skippedNoBarcodeCount > 0 
+                    ? $"No products with barcode found ({skippedNoBarcodeCount} products skipped - no barcode)"
+                    : "No products scraped";
+                await onProgress(100, noProductsMsg, "error");
                 await SendComplete(onProgress, null, null);
             }
         }
@@ -182,18 +228,18 @@ public class HepsiburadaScraperService
                     var exporter = new ExcelExporter();
                     exporter.ExportToExcel(products, filePath, excludePrice, processImages);
                     
-                    await onProgress(100, $"?? Error occurred but saved {products.Count} products", "warning");
+                    await onProgress(100, $"Error occurred but saved {products.Count} products", "warning");
                     await SendComplete(onProgress, fileName, products.Count);
                 }
                 catch
                 {
-                    await onProgress(100, $"? Error: {ex.Message}", "error");
+                    await onProgress(100, $"Error: {ex.Message}", "error");
                     await SendComplete(onProgress, null, null);
                 }
             }
             else
             {
-                await onProgress(100, $"? Error: {ex.Message}", "error");
+                await onProgress(100, $"Error: {ex.Message}", "error");
                 await SendComplete(onProgress, null, null);
             }
         }
