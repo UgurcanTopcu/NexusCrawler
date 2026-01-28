@@ -576,6 +576,134 @@ public class AkakceScraper : IDisposable
     }
 
     /// <summary>
+    /// Search for a product by name and return the first result's URL
+    /// Uses the Akakce search form: /arama/?q={query}
+    /// </summary>
+    public async Task<string?> SearchProductAsync(string productName)
+    {
+        if (string.IsNullOrWhiteSpace(productName))
+        {
+            Console.WriteLine("[Akakce] ERROR: Product name is empty");
+            return null;
+        }
+
+        try
+        {
+            InitializeDriver();
+            
+            // URL encode the product name for search
+            var encodedQuery = System.Net.WebUtility.UrlEncode(productName.Trim());
+            var searchUrl = $"https://www.akakce.com/arama/?q={encodedQuery}";
+            
+            Console.WriteLine($"[Akakce] Searching for: {productName}");
+            Console.WriteLine($"[Akakce] Search URL: {searchUrl}");
+            
+            // Navigate to search results
+            if (!await NavigateWithRetry(searchUrl, 2))
+            {
+                Console.WriteLine("[Akakce] Failed to load search page (Cloudflare block)");
+                return null;
+            }
+            
+            await RandomDelay(500, 1000);
+            
+            // Check if we were redirected directly to a product page
+            var currentUrl = _driver!.Url;
+            if (IsProductUrl(currentUrl))
+            {
+                Console.WriteLine($"[Akakce] Search redirected directly to product: {currentUrl}");
+                return currentUrl;
+            }
+            
+            // Extract first product URL from search results
+            var jsExecutor = (IJavaScriptExecutor)_driver;
+            
+            // Scroll to load lazy content
+            jsExecutor.ExecuteScript("window.scrollTo(0, 300);");
+            await RandomDelay(300, 500);
+            
+            var firstProductUrl = jsExecutor.ExecuteScript(@"
+                // Method 1: Look for product links in search results list
+                var productList = document.querySelector('ul#CPL') || 
+                                 document.querySelector('ul.pl_v9.qv_v9') ||
+                                 document.querySelector('ul.pl_v9');
+                
+                if (productList) {
+                    var firstProduct = productList.querySelector('li[data-pr] a[href]');
+                    if (firstProduct) {
+                        var href = firstProduct.getAttribute('href');
+                        if (href && href.match(/,\d+\.html$/)) {
+                            console.log('[Akakce Search] Found product in list: ' + href);
+                            return href.startsWith('/') ? 'https://www.akakce.com' + href : href;
+                        }
+                    }
+                }
+                
+                // Method 2: Look for any product link matching the pattern
+                var allLinks = document.querySelectorAll('a[href*="",""][href$="".html""]');
+                for (var i = 0; i < allLinks.length; i++) {
+                    var href = allLinks[i].getAttribute('href');
+                    if (href && href.match(/,\d+\.html$/)) {
+                        console.log('[Akakce Search] Found product link: ' + href);
+                        return href.startsWith('/') ? 'https://www.akakce.com' + href : href;
+                    }
+                }
+                
+                // Method 3: Check if page shows 'no results' message
+                var noResults = document.querySelector('.no-result') || 
+                               document.querySelector('[class*=""noResult""]') ||
+                               document.querySelector('[class*=""empty""]');
+                if (noResults) {
+                    console.log('[Akakce Search] No results found');
+                    return 'NO_RESULTS';
+                }
+                
+                console.log('[Akakce Search] No product links found on page');
+                return null;
+            ");
+            
+            if (firstProductUrl == null || string.IsNullOrEmpty(firstProductUrl.ToString()))
+            {
+                Console.WriteLine("[Akakce] No product found in search results");
+                return null;
+            }
+            
+            var productUrl = firstProductUrl.ToString()!;
+            
+            if (productUrl == "NO_RESULTS")
+            {
+                Console.WriteLine("[Akakce] Search returned no results");
+                return null;
+            }
+            
+            // Validate it's a proper product URL
+            if (!IsProductUrl(productUrl))
+            {
+                Console.WriteLine($"[Akakce] Invalid product URL format: {productUrl}");
+                return null;
+            }
+            
+            Console.WriteLine($"[Akakce] ✓ Found product: {productUrl}");
+            return productUrl;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Akakce] Search error: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Check if a URL is a valid Akakce product page URL
+    /// </summary>
+    private bool IsProductUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return false;
+        return url.Contains("akakce.com") && 
+               System.Text.RegularExpressions.Regex.IsMatch(url, @",\d+\.html$");
+    }
+
+    /// <summary>
     /// Scrape a single Akakce product page with optional variant scanning
     /// </summary>
     public async Task<AkakceProductInfo> ScrapeProductAsync(string productUrl, bool scanAllVariants = false)

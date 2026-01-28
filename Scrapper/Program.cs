@@ -31,6 +31,7 @@ builder.Services.AddSingleton<ImageProcessingService>(sp =>
 builder.Services.AddSingleton<TrendyolScraperService>();
 builder.Services.AddSingleton<HepsiburadaScraperService>();
 builder.Services.AddSingleton<AkakceScraperService>();
+builder.Services.AddSingleton<AkakceSearchService>();
 
 // Bulk Image Services
 builder.Services.AddSingleton<BulkImageExcelReader>();
@@ -83,57 +84,6 @@ app.UseAuthorization();
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
-
-// ============================================
-// PAGE ROUTES - Serve HTML from wwwroot/pages
-// ============================================
-
-app.MapGet("/", async (IWebHostEnvironment env) =>
-{
-    var filePath = Path.Combine(env.WebRootPath, "pages", "index.html");
-    var content = await File.ReadAllTextAsync(filePath);
-    return Results.Content(content, "text/html; charset=utf-8");
-});
-
-app.MapGet("/akakce", async (IWebHostEnvironment env) =>
-{
-    var filePath = Path.Combine(env.WebRootPath, "pages", "akakce.html");
-    var content = await File.ReadAllTextAsync(filePath);
-    return Results.Content(content, "text/html; charset=utf-8");
-});
-
-app.MapGet("/bulk-image", async (IWebHostEnvironment env) =>
-{
-    var filePath = Path.Combine(env.WebRootPath, "pages", "bulk-image.html");
-    var content = await File.ReadAllTextAsync(filePath);
-    return Results.Content(content, "text/html; charset=utf-8");
-});
-
-// ============================================
-// STOP ENDPOINTS
-// ============================================
-
-app.MapPost("/api/stop/{sessionId}", (string sessionId) =>
-{
-    TrendyolScraperService.StopSession(sessionId);
-    HepsiburadaScraperService.StopSession(sessionId);
-    Console.WriteLine($"[API] Stop requested for session: {sessionId}");
-    return Results.Ok(new { message = "Stop signal sent" });
-});
-
-app.MapPost("/api/akakce/stop/{sessionId}", (string sessionId) =>
-{
-    AkakceScraperService.StopSession(sessionId);
-    Console.WriteLine($"[API] Akakce stop requested for session: {sessionId}");
-    return Results.Ok(new { message = "Stop signal sent" });
-});
-
-app.MapPost("/api/bulk-image/stop/{sessionId}", (string sessionId) =>
-{
-    BulkImageProcessingService.StopSession(sessionId);
-    Console.WriteLine($"[API] Bulk image stop requested for session: {sessionId}");
-    return Results.Ok(new { message = "Stop signal sent" });
-});
 
 // ============================================
 // API ENDPOINTS
@@ -284,12 +234,42 @@ app.MapPost("/api/akakce/scrape", async (HttpRequest request, AkakceScraperServi
     }, "text/event-stream");
 });
 
-// Get available templates
-app.MapGet("/api/templates", () =>
+// Akakce search endpoint - search by product name from Excel
+app.MapPost("/api/akakce/search", async (HttpRequest request, AkakceSearchService searchService) =>
 {
-    var templateService = new TemplateService();
-    var templates = templateService.GetTemplateInfo();
-    return Results.Ok(templates);
+    return Results.Stream(async (stream) =>
+    {
+        var writer = new StreamWriter(stream);
+        
+        try
+        {
+            var form = await request.ReadFormAsync();
+            var file = form.Files.GetFile("file");
+            var sessionId = form["sessionId"].ToString();
+            var scanVariantsStr = form["scanVariants"].ToString();
+            
+            if (file == null || file.Length == 0)
+            {
+                await SseHelper.SendNoFileErrorAsync(writer);
+                return;
+            }
+            
+            bool scanVariants = bool.TryParse(scanVariantsStr, out var sv) && sv;
+            
+            using var memoryStream = await SseHelper.ReadFileToMemoryStreamAsync(file);
+            
+            await searchService.SearchAndScrapeFromExcelAsync(
+                memoryStream,
+                scanVariants,
+                SseHelper.CreateProgressCallback(writer),
+                sessionId
+            );
+        }
+        catch (Exception ex)
+        {
+            await SseHelper.SendErrorAsync(writer, ex.Message);
+        }
+    }, "text/event-stream");
 });
 
 // Download endpoint
@@ -306,6 +286,65 @@ app.MapGet("/api/download/{fileName}", (string fileName) =>
 });
 
 // ============================================
+// STOP ENDPOINTS
+// ============================================
+
+app.MapPost("/api/stop/{sessionId}", (string sessionId) =>
+{
+    TrendyolScraperService.StopSession(sessionId);
+    HepsiburadaScraperService.StopSession(sessionId);
+    Console.WriteLine($"[API] Stop requested for session: {sessionId}");
+    return Results.Ok(new { message = "Stop signal sent" });
+});
+
+app.MapPost("/api/akakce/stop/{sessionId}", (string sessionId) =>
+{
+    AkakceScraperService.StopSession(sessionId);
+    AkakceSearchService.StopSession(sessionId);
+    Console.WriteLine($"[API] Akakce stop requested for session: {sessionId}");
+    return Results.Ok(new { message = "Stop signal sent" });
+});
+
+app.MapPost("/api/bulk-image/stop/{sessionId}", (string sessionId) =>
+{
+    BulkImageProcessingService.StopSession(sessionId);
+    Console.WriteLine($"[API] Bulk image stop requested for session: {sessionId}");
+    return Results.Ok(new { message = "Stop signal sent" });
+});
+
+// ============================================
+// PAGE ROUTES - Serve HTML from wwwroot/pages
+// ============================================
+
+app.MapGet("/", async (IWebHostEnvironment env) =>
+{
+    var filePath = Path.Combine(env.WebRootPath, "pages", "index.html");
+    var content = await File.ReadAllTextAsync(filePath);
+    return Results.Content(content, "text/html; charset=utf-8");
+});
+
+app.MapGet("/akakce", async (IWebHostEnvironment env) =>
+{
+    var filePath = Path.Combine(env.WebRootPath, "pages", "akakce.html");
+    var content = await File.ReadAllTextAsync(filePath);
+    return Results.Content(content, "text/html; charset=utf-8");
+});
+
+app.MapGet("/akakce-search", async (IWebHostEnvironment env) =>
+{
+    var filePath = Path.Combine(env.WebRootPath, "pages", "akakce-search.html");
+    var content = await File.ReadAllTextAsync(filePath);
+    return Results.Content(content, "text/html; charset=utf-8");
+});
+
+app.MapGet("/bulk-image", async (IWebHostEnvironment env) =>
+{
+    var filePath = Path.Combine(env.WebRootPath, "pages", "bulk-image.html");
+    var content = await File.ReadAllTextAsync(filePath);
+    return Results.Content(content, "text/html; charset=utf-8");
+});
+
+// ============================================
 // STARTUP
 // ============================================
 
@@ -313,6 +352,7 @@ Console.WriteLine("🔧 Scrapper Web Application");
 Console.WriteLine("🌐 Open your browser and navigate to: http://localhost:5000");
 Console.WriteLine("   - Category Scraper: http://localhost:5000/");
 Console.WriteLine("   - Akakce Scraper: http://localhost:5000/akakce");
+Console.WriteLine("   - Akakce Search: http://localhost:5000/akakce-search");
 Console.WriteLine("   - Bulk Image Uploader: http://localhost:5000/bulk-image");
 Console.WriteLine("Press Ctrl+C to stop the server");
 
