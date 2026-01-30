@@ -1,4 +1,4 @@
-using Scrapper.Models;
+Ôªøusing Scrapper.Models;
 using System.Collections.Concurrent;
 
 namespace Scrapper.Services;
@@ -51,12 +51,23 @@ public class AkakceSearchService
                 return;
             }
 
-            await onProgress(5, $"? Found {productNames.Count} product names to search", "success");
+            await onProgress(5, $"‚úÖ Found {productNames.Count} product names to search", "success");
 
             using var scraper = new AkakceScraper();
 
-            var progressPerProduct = 85.0 / productNames.Count;
-            var currentProgress = 10.0;
+            // Connect to user's Edge browser (must be started with --remote-debugging-port=9222)
+            await onProgress(6, "üîó Connecting to your Edge browser...", "info");
+            var warmupSuccess = await scraper.WarmupAsync(onProgress);
+            
+            if (!warmupSuccess)
+            {
+                await onProgress(100, "‚ùå Could not connect to Edge. See console for setup instructions.", "error");
+                await SendComplete(onProgress, null, 0);
+                return;
+            }
+
+            var progressPerProduct = 82.0 / productNames.Count;
+            var currentProgress = 12.0;
 
             for (int i = 0; i < productNames.Count; i++)
             {
@@ -185,9 +196,9 @@ public class AkakceSearchService
             int startRow = 1;
             var firstCell = worksheet.Cells[1, 1].Value?.ToString()?.Trim() ?? "";
             if (firstCell.Equals("Product Name", StringComparison.OrdinalIgnoreCase) ||
-                firstCell.Equals("‹r¸n Ad˝", StringComparison.OrdinalIgnoreCase) ||
+                firstCell.Equals("√úr√ºn Adƒ±", StringComparison.OrdinalIgnoreCase) ||
                 firstCell.Equals("Name", StringComparison.OrdinalIgnoreCase) ||
-                firstCell.Equals("‹r¸n", StringComparison.OrdinalIgnoreCase))
+                firstCell.Equals("√úr√ºn", StringComparison.OrdinalIgnoreCase))
             {
                 startRow = 2;
                 Console.WriteLine("[AkakceSearch] Detected header row, starting from row 2");
