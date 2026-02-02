@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hepsiburada Barcode Search</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body data-theme="purple">
+    <div class="container">
+        <h1>&#128275; Hepsiburada Barcode Search</h1>
+        <p class="subtitle">Upload an Excel file with barcodes to check product availability on Hepsiburada</p>
+
+        <!-- Navigation Buttons -->
+        <div class="nav-buttons">
+            <div class="nav-btn" onclick="navigateTo('/')">
+                <h3>&#128722; Category Scraper</h3>
+                <p>Trendyol &amp; Hepsiburada</p>
+            </div>
+            <div class="nav-btn" onclick="navigateTo('/akakce')">
+                <h3>&#128176; Akakce Scraper</h3>
+                <p>Price Comparison</p>
+            </div>
+            <div class="nav-btn active" onclick="navigateTo('/hepsiburada-barcode')">
+                <h3>&#128275; Barcode Search</h3>
+                <p>Hepsiburada Barcode Check</p>
+            </div>
+            <div class="nav-btn" onclick="navigateTo('/bulk-image')">
+                <h3>&#128444;&#65039; Bulk Image</h3>
+                <p>Process &amp; Upload Images</p>
+            </div>
+        </div>
+
+        <div class="form-section">
+            <div class="form-group">
+                <label for="excelFile">&#128193; Excel File (Barcodes in Column A)</label>
+                <input type="file" id="excelFile" accept=".xlsx,.xls" class="file-input">
+                <div class="input-hint">Excel should have barcodes in the first column (A). Header row is optional.</div>
+            </div>
+
+            <div class="info-box" style="background: #2a2a4a; border: 1px solid #444; border-radius: 8px; padding: 15px; margin: 15px 0;">
+                <h4 style="margin-top: 0;">&#8505;&#65039; How it works</h4>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                    <li>Upload an Excel file with barcodes (EAN/UPC/GTIN) in column A</li>
+                    <li>Each barcode is searched on Hepsiburada via ScrapeDo API</li>
+                    <li>Results show if product exists and include the product URL</li>
+                    <li>Download the results as an Excel file</li>
+                </ul>
+                <p style="margin-bottom: 0;"><strong>Example barcodes:</strong><br>
+                <code style="background: #1a1a2e; padding: 2px 6px; border-radius: 3px;">8699247701638</code><br>
+                <code style="background: #1a1a2e; padding: 2px 6px; border-radius: 3px;">8680000000000</code></p>
+            </div>
+
+            <div class="button-group">
+                <button id="startBtn" class="btn btn-primary" onclick="startSearch()">&#128640; Start Search</button>
+                <button id="stopBtn" class="btn btn-danger" onclick="stopSearch()" disabled>&#9940; Stop</button>
+                <button id="resetBtn" class="btn btn-secondary" onclick="resetForm()">&#128260; Reset</button>
+            </div>
+        </div>
+
+        <div class="progress-section" id="progressSection" style="display: none;">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+            <div class="progress-text" id="progressText">0%</div>
+        </div>
+
+        <div class="log-section">
+            <h3>&#128203; Progress Log</h3>
+            <div class="log-container" id="logContainer"></div>
+        </div>
+
+        <div class="download-section" id="downloadSection" style="display: none;">
+            <a id="downloadLink" class="btn btn-success" href="#">&#128229; Download Results</a>
+        </div>
+
+        <div class="back-link">
+            <a href="/">&larr; Back to Home</a>
+        </div>
+    </div>
+
+    <script>
+        function navigateTo(url) {
+            window.location.href = url;
+        }
+        
+        let eventSource = null;
+        let sessionId = null;
+
+        function generateSessionId() {
+            return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        async function startSearch() {
+            const fileInput = document.getElementById('excelFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                addLog('Please select an Excel file', 'error');
+                return;
+            }
+
+            // Disable start button, enable stop
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('progressSection').style.display = 'block';
+            document.getElementById('downloadSection').style.display = 'none';
+
+            // Clear previous logs
+            document.getElementById('logContainer').innerHTML = '';
+
+            sessionId = generateSessionId();
+
+            // Upload file and start search
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('sessionId', sessionId);
+
+            addLog('Uploading Excel file...', 'info');
+
+            try {
+                const response = await fetch('/api/hepsiburada-barcode/search', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status);
+                }
+
+                // Read SSE from response body
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const text = decoder.decode(value);
+                    const lines = text.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.substring(6));
+                                handleProgress(data);
+                            } catch (e) {
+                                // Skip non-JSON lines
+                            }
+                        }
+                    }
+                }
+
+                resetButtons();
+
+            } catch (error) {
+                addLog('Error: ' + error.message, 'error');
+                resetButtons();
+            }
+        }
+
+        function handleProgress(data) {
+            // Update progress bar
+            const progress = data.progress || 0;
+            document.getElementById('progressFill').style.width = progress + '%';
+            document.getElementById('progressText').textContent = progress + '%';
+
+            // Add log entry
+            if (data.message) {
+                addLog(data.message, data.type || 'info');
+            }
+
+            // Check for completion
+            if (data.type === 'complete') {
+                try {
+                    const completeData = JSON.parse(data.message);
+                    if (completeData.downloadUrl) {
+                        document.getElementById('downloadSection').style.display = 'block';
+                        document.getElementById('downloadLink').href = completeData.downloadUrl;
+                        document.getElementById('downloadLink').textContent = 'Download Results (' + completeData.foundCount + ' found)';
+                    }
+                } catch (e) {
+                    // Not JSON, just a message
+                }
+                resetButtons();
+            }
+        }
+
+        async function stopSearch() {
+            if (sessionId) {
+                try {
+                    await fetch('/api/hepsiburada-barcode/stop?sessionId=' + sessionId, { method: 'POST' });
+                    addLog('Search stopped by user', 'warning');
+                } catch (e) {
+                    console.error('Error stopping search:', e);
+                }
+            }
+            resetButtons();
+        }
+
+        function resetForm() {
+            document.getElementById('excelFile').value = '';
+            document.getElementById('logContainer').innerHTML = '';
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressText').textContent = '0%';
+            document.getElementById('progressSection').style.display = 'none';
+            document.getElementById('downloadSection').style.display = 'none';
+            resetButtons();
+        }
+
+        function resetButtons() {
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+        }
+
+        function addLog(message, type) {
+            type = type || 'info';
+            const container = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry log-' + type;
+            
+            const time = new Date().toLocaleTimeString();
+            entry.textContent = '[' + time + '] ' + message;
+            
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+    </script>
+</body>
+</html>

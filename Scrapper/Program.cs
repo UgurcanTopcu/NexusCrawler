@@ -32,6 +32,7 @@ builder.Services.AddSingleton<TrendyolScraperService>();
 builder.Services.AddSingleton<HepsiburadaScraperService>();
 builder.Services.AddSingleton<AkakceScraperService>();
 builder.Services.AddSingleton<AkakceSearchService>();
+builder.Services.AddSingleton<HepsiburadaBarcodeSearchService>();
 
 // Bulk Image Services
 builder.Services.AddSingleton<BulkImageExcelReader>();
@@ -272,6 +273,40 @@ app.MapPost("/api/akakce/search", async (HttpRequest request, AkakceSearchServic
     }, "text/event-stream");
 });
 
+// Hepsiburada barcode search endpoint - search by barcode from Excel
+app.MapPost("/api/hepsiburada-barcode/search", async (HttpRequest request, HepsiburadaBarcodeSearchService barcodeService) =>
+{
+    return Results.Stream(async (stream) =>
+    {
+        var writer = new StreamWriter(stream);
+        
+        try
+        {
+            var form = await request.ReadFormAsync();
+            var file = form.Files.GetFile("file");
+            var sessionId = form["sessionId"].ToString();
+            
+            if (file == null || file.Length == 0)
+            {
+                await SseHelper.SendNoFileErrorAsync(writer);
+                return;
+            }
+            
+            using var memoryStream = await SseHelper.ReadFileToMemoryStreamAsync(file);
+            
+            await barcodeService.SearchBarcodesFromExcelAsync(
+                memoryStream,
+                SseHelper.CreateProgressCallback(writer),
+                sessionId
+            );
+        }
+        catch (Exception ex)
+        {
+            await SseHelper.SendErrorAsync(writer, ex.Message);
+        }
+    }, "text/event-stream");
+});
+
 // Download endpoint
 app.MapGet("/api/download/{fileName}", (string fileName) =>
 {
@@ -312,6 +347,14 @@ app.MapPost("/api/bulk-image/stop/{sessionId}", (string sessionId) =>
     return Results.Ok(new { message = "Stop signal sent" });
 });
 
+app.MapPost("/api/hepsiburada-barcode/stop", (HttpRequest request) =>
+{
+    var sessionId = request.Query["sessionId"].ToString();
+    HepsiburadaBarcodeSearchService.StopSession(sessionId);
+    Console.WriteLine($"[API] Hepsiburada barcode stop requested for session: {sessionId}");
+    return Results.Ok(new { message = "Stop signal sent" });
+});
+
 // ============================================
 // PAGE ROUTES - Serve HTML from wwwroot/pages
 // ============================================
@@ -333,6 +376,13 @@ app.MapGet("/akakce", async (IWebHostEnvironment env) =>
 app.MapGet("/akakce-search", async (IWebHostEnvironment env) =>
 {
     var filePath = Path.Combine(env.WebRootPath, "pages", "akakce-search.html");
+    var content = await File.ReadAllTextAsync(filePath);
+    return Results.Content(content, "text/html; charset=utf-8");
+});
+
+app.MapGet("/hepsiburada-barcode", async (IWebHostEnvironment env) =>
+{
+    var filePath = Path.Combine(env.WebRootPath, "pages", "hepsiburada-barcode.html");
     var content = await File.ReadAllTextAsync(filePath);
     return Results.Content(content, "text/html; charset=utf-8");
 });
