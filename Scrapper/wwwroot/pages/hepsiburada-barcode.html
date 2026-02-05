@@ -3,132 +3,417 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hepsiburada Barcode Search</title>
-    <link rel="stylesheet" href="/css/styles.css">
+    <title>Mirakl Catalogue Analysis</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+            min-height: 100vh;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+
+        .app-container { max-width: 1000px; margin: 0 auto; }
+
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+        .header p { color: #94a3b8; font-size: 15px; }
+
+        .nav-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 30px; }
+
+        .nav-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 14px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .nav-item:hover { background: rgba(139, 92, 246, 0.15); border-color: rgba(139, 92, 246, 0.3); transform: translateY(-2px); }
+        .nav-item.active { background: rgba(139, 92, 246, 0.2); border-color: #8b5cf6; }
+        .nav-item h3 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .nav-item p { font-size: 11px; color: #94a3b8; }
+
+        .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+
+        .card {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .card-body { padding: 20px; }
+
+        .upload-area {
+            border: 2px dashed rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: rgba(139, 92, 246, 0.05);
+        }
+
+        .upload-area:hover { border-color: rgba(139, 92, 246, 0.6); background: rgba(139, 92, 246, 0.1); }
+        .upload-area.has-file { border-color: #10b981; border-style: solid; background: rgba(16, 185, 129, 0.1); }
+        .upload-area.drag-over { border-color: #8b5cf6; background: rgba(139, 92, 246, 0.15); transform: scale(1.02); }
+
+        .upload-icon { font-size: 48px; margin-bottom: 16px; }
+        .upload-area h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: #e2e8f0; }
+        .upload-area p { font-size: 13px; color: #94a3b8; }
+
+        .file-selected { display: none; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; padding: 12px 16px; background: rgba(16, 185, 129, 0.15); border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .file-selected.show { display: flex; }
+        .file-selected .file-name { font-size: 14px; font-weight: 500; color: #10b981; }
+
+        .btn-remove { background: rgba(239, 68, 68, 0.2); border: none; color: #ef4444; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; }
+        .btn-remove:hover { background: rgba(239, 68, 68, 0.4); }
+
+        .info-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+        .pill { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 20px; font-size: 12px; color: #a78bfa; }
+
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .stat-box { background: rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 16px; text-align: center; }
+        .stat-box .value { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+        .stat-box .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-box.total .value { color: #8b5cf6; }
+        .stat-box.found .value { color: #10b981; }
+        .stat-box.notfound .value { color: #ef4444; }
+
+        .progress-section { margin-top: 16px; }
+        .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .progress-header span { font-size: 14px; color: #94a3b8; }
+        .progress-header .percent { font-size: 18px; font-weight: 700; color: #8b5cf6; }
+        .progress-track { height: 8px; background: rgba(139, 92, 246, 0.2); border-radius: 10px; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #8b5cf6, #6366f1); border-radius: 10px; width: 0%; transition: width 0.3s ease; }
+
+        .action-buttons { display: flex; gap: 10px; margin-top: 20px; }
+
+        .btn {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; }
+        .btn-primary:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4); }
+        .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+        .btn-danger:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4); }
+        .btn-secondary { background: rgba(255, 255, 255, 0.1); color: #e2e8f0; border: 1px solid rgba(255, 255, 255, 0.2); }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+
+        .log-card { grid-column: 1 / -1; }
+        .log-body { height: 350px; overflow-y: auto; padding: 0; }
+        .log-body::-webkit-scrollbar { width: 6px; }
+        .log-body::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
+        .log-body::-webkit-scrollbar-thumb { background: rgba(139, 92, 246, 0.3); border-radius: 3px; }
+
+        .log-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #64748b; }
+        .log-empty span { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
+
+        .log-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+        .log-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+        .log-item.success .log-icon { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .log-item.error .log-icon { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .log-item.warning .log-icon { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .log-item.info .log-icon { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+
+        .log-content { flex: 1; min-width: 0; }
+        .log-message { font-size: 13px; line-height: 1.5; word-break: break-word; }
+        .log-item.success .log-message { color: #10b981; }
+        .log-item.error .log-message { color: #f87171; }
+        .log-item.warning .log-message { color: #fbbf24; }
+        .log-item.info .log-message { color: #e2e8f0; }
+        .log-time { font-size: 11px; color: #64748b; flex-shrink: 0; }
+
+        .btn-clear { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s ease; }
+        .btn-clear:hover { background: rgba(239, 68, 68, 0.2); }
+
+        .download-section { display: none; grid-column: 1 / -1; }
+        .download-section.show { display: block; }
+
+        .download-card { background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.15)); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 16px; padding: 40px; text-align: center; }
+        .download-card .icon { font-size: 56px; margin-bottom: 16px; }
+        .download-card h3 { font-size: 24px; font-weight: 700; color: #10b981; margin-bottom: 8px; }
+        .download-card p { color: #94a3b8; margin-bottom: 24px; }
+
+        .btn-download { display: inline-flex; align-items: center; gap: 10px; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 14px 32px; border-radius: 10px; font-size: 16px; font-weight: 600; text-decoration: none; transition: all 0.2s ease; }
+        .btn-download:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4); }
+
+        .footer { text-align: center; margin-top: 30px; }
+        .footer a { color: #8b5cf6; text-decoration: none; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; transition: color 0.2s ease; }
+        .footer a:hover { color: #a78bfa; }
+
+        @media (max-width: 768px) {
+            .nav-grid { grid-template-columns: repeat(2, 1fr); }
+            .main-grid { grid-template-columns: 1fr; }
+        }
+    </style>
 </head>
-<body data-theme="purple">
-    <div class="container">
-        <h1>&#128275; Hepsiburada Barcode Search</h1>
-        <p class="subtitle">Upload an Excel file with barcodes to check product availability on Hepsiburada</p>
+<body>
+<div class="app-container">
+    <div class="header">
+        <h1>📊 Mirakl Catalogue Analysis</h1>
+        <p>Upload an Excel file with barcodes to check product availability on Hepsiburada</p>
+    </div>
 
-        <!-- Navigation Buttons -->
-        <div class="nav-buttons">
-            <div class="nav-btn" onclick="navigateTo('/')">
-                <h3>&#128722; Category Scraper</h3>
-                <p>Trendyol &amp; Hepsiburada</p>
+    <div class="nav-grid">
+        <div class="nav-item" onclick="location.href='/'">
+            <h3>🛒 Category Scraper</h3>
+            <p>Trendyol & Hepsiburada</p>
+        </div>
+        <div class="nav-item" onclick="location.href='/akakce'">
+            <h3>💰 Akakce Lead Gen</h3>
+            <p>Price Comparison</p>
+        </div>
+        <div class="nav-item active">
+            <h3>📊 Mirakl Catalogue</h3>
+            <p>Catalogue Analysis</p>
+        </div>
+        <div class="nav-item" onclick="location.href='/bulk-image'">
+            <h3>🖼️ Image Resizing</h3>
+            <p>Bulk Processing</p>
+        </div>
+    </div>
+
+    <div class="main-grid">
+        <div class="card">
+            <div class="card-header">
+                <h2>📁 Upload Excel File</h2>
             </div>
-            <div class="nav-btn" onclick="navigateTo('/akakce')">
-                <h3>&#128176; Akakce Scraper</h3>
-                <p>Price Comparison</p>
+            <div class="card-body">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📂</div>
+                    <h3 id="uploadText">Drop file here or click to browse</h3>
+                    <p id="uploadHint">Supports .xlsx and .xls files</p>
+                    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
+                    </div>
+                    <div class="file-selected" id="fileSelected">
+                        <span>📄</span>
+                        <span class="file-name" id="fileName"></span>
+                        <button class="btn-remove" onclick="removeFile(event)">✕</button>
+                    </div>
+                    <div class="info-pills">
+                        <div class="pill"><span>📊</span> Column A = Barcodes</div>
+                        <div class="pill"><span>🔗</span> Pipe: 123|456</div>
+                        <div class="pill"><span>⚡</span> 5 parallel</div>
+                    </div>
+                </div>
             </div>
-            <div class="nav-btn active" onclick="navigateTo('/hepsiburada-barcode')">
-                <h3>&#128275; Barcode Search</h3>
-                <p>Hepsiburada Barcode Check</p>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2>📊 Search Statistics</h2>
+                </div>
+                <div class="card-body">
+                    <div class="stats-grid">
+                        <div class="stat-box total">
+                            <div class="value" id="statTotal">0</div>
+                            <div class="label">Total</div>
+                        </div>
+                        <div class="stat-box found">
+                            <div class="value" id="statFound">0</div>
+                            <div class="label">Found</div>
+                        </div>
+                        <div class="stat-box notfound">
+                            <div class="value" id="statNotFound">0</div>
+                            <div class="label">Not Found</div>
+                        </div>
+                    </div>
+                    <div class="progress-section" id="progressSection">
+                        <div class="progress-header">
+                            <span>Progress</span>
+                            <span class="percent" id="progressPercent">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-bar" id="progressBar"></div>
+                        </div>
+                    </div>
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" id="startBtn" onclick="startSearch()" disabled>
+                            <span>🚀</span> Start
+                        </button>
+                        <button class="btn btn-danger" id="stopBtn" onclick="stopSearch()" disabled>
+                            <span>⛔</span> Stop
+                        </button>
+                        <button class="btn btn-secondary" onclick="resetForm()">
+                            <span>🔄</span> Reset
+                        </button>
+                    </div>
+                </div>
             </div>
-            <div class="nav-btn" onclick="navigateTo('/bulk-image')">
-                <h3>&#128444;&#65039; Bulk Image</h3>
-                <p>Process &amp; Upload Images</p>
+
+            <div class="card log-card">
+                <div class="card-header">
+                    <h2>📋 Activity Log</h2>
+                    <button class="btn-clear" onclick="clearLog()">Clear</button>
+                </div>
+                <div class="log-body" id="logBody">
+                    <div class="log-empty" id="logEmpty">
+                        <span>📋</span>
+                        <p>Upload a file to start searching</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="download-section" id="downloadSection">
+                <div class="download-card">
+                    <div class="icon">✅</div>
+                    <h3>Search Complete!</h3>
+                    <p id="downloadMessage">Your results are ready</p>
+                    <a href="#" class="btn-download" id="downloadLink">
+                        <span>⬇️</span> Download Excel Report
+                    </a>
+                </div>
             </div>
         </div>
 
-        <div class="form-section">
-            <div class="form-group">
-                <label for="excelFile">&#128193; Excel File (Barcodes in Column A)</label>
-                <input type="file" id="excelFile" accept=".xlsx,.xls" class="file-input">
-                <div class="input-hint">Excel should have barcodes in the first column (A). Header row is optional.</div>
-            </div>
-
-            <div class="info-box" style="background: #2a2a4a; border: 1px solid #444; border-radius: 8px; padding: 15px; margin: 15px 0;">
-                <h4 style="margin-top: 0;">&#8505;&#65039; How it works</h4>
-                <ul style="margin: 10px 0; padding-left: 20px;">
-                    <li>Upload an Excel file with barcodes (EAN/UPC/GTIN) in column A</li>
-                    <li>Each barcode is searched on Hepsiburada via ScrapeDo API</li>
-                    <li>Results show if product exists and include the product URL</li>
-                    <li>Download the results as an Excel file</li>
-                </ul>
-                <p style="margin-bottom: 0;"><strong>Example barcodes:</strong><br>
-                <code style="background: #1a1a2e; padding: 2px 6px; border-radius: 3px;">8699247701638</code><br>
-                <code style="background: #1a1a2e; padding: 2px 6px; border-radius: 3px;">8680000000000</code></p>
-            </div>
-
-            <div class="button-group">
-                <button id="startBtn" class="btn btn-primary" onclick="startSearch()">&#128640; Start Search</button>
-                <button id="stopBtn" class="btn btn-danger" onclick="stopSearch()" disabled>&#9940; Stop</button>
-                <button id="resetBtn" class="btn btn-secondary" onclick="resetForm()">&#128260; Reset</button>
-            </div>
-        </div>
-
-        <div class="progress-section" id="progressSection" style="display: none;">
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
-            </div>
-            <div class="progress-text" id="progressText">0%</div>
-        </div>
-
-        <div class="log-section">
-            <h3>&#128203; Progress Log</h3>
-            <div class="log-container" id="logContainer"></div>
-        </div>
-
-        <div class="download-section" id="downloadSection" style="display: none;">
-            <a id="downloadLink" class="btn btn-success" href="#">&#128229; Download Results</a>
-        </div>
-
-        <div class="back-link">
-            <a href="/">&larr; Back to Home</a>
+        <div class="footer">
+            <a href="/">← Back to Home</a>
         </div>
     </div>
 
     <script>
-        function navigateTo(url) {
-            window.location.href = url;
-        }
-        
-        let eventSource = null;
         let sessionId = null;
+        let stats = { total: 0, found: 0, notFound: 0 };
 
-        function generateSessionId() {
-            return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileSelected = document.getElementById('fileSelected');
+        const fileName = document.getElementById('fileName');
+        const uploadText = document.getElementById('uploadText');
+        const uploadHint = document.getElementById('uploadHint');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const logBody = document.getElementById('logBody');
+        const logEmpty = document.getElementById('logEmpty');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; handleFile(); }
+        });
+
+        fileInput.addEventListener('change', handleFile);
+
+        function handleFile() {
+            const file = fileInput.files[0];
+            if (file) {
+                fileName.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                fileSelected.classList.add('show');
+                uploadText.style.display = 'none';
+                uploadHint.style.display = 'none';
+                uploadArea.classList.add('has-file');
+                startBtn.disabled = false;
+            }
+        }
+
+        function removeFile(e) {
+            if (e) e.stopPropagation();
+            fileInput.value = '';
+            fileSelected.classList.remove('show');
+            uploadText.style.display = 'block';
+            uploadHint.style.display = 'block';
+            uploadArea.classList.remove('has-file');
+            startBtn.disabled = true;
+        }
+
+        function updateStats() {
+            document.getElementById('statTotal').textContent = stats.total;
+            document.getElementById('statFound').textContent = stats.found;
+            document.getElementById('statNotFound').textContent = stats.notFound;
+        }
+
+        function addLog(message, type = 'info') {
+            logEmpty.style.display = 'none';
+            const iconMap = { success: '✓', error: '✗', warning: '!', info: 'ℹ' };
+            const item = document.createElement('div');
+            item.className = `log-item ${type}`;
+            item.innerHTML = `
+                <div class="log-icon">${iconMap[type] || 'ℹ'}</div>
+                <div class="log-content"><div class="log-message">${message}</div></div>
+                <div class="log-time">${new Date().toLocaleTimeString()}</div>
+            `;
+            logBody.appendChild(item);
+            logBody.scrollTop = logBody.scrollHeight;
+
+            // Parse progress messages to update stats
+            // Format: "[X/Y] barcode: Found/Not Found"
+            const match = message.match(/\[(\d+)\/(\d+)\]/);
+            if (match) {
+                stats.total = parseInt(match[2]);
+                const current = parseInt(match[1]);
+                
+                // Count based on message type
+                if (type === 'success' && message.includes(': Found')) {
+                    stats.found++;
+                } else if (type === 'warning' && message.includes(': Not Found')) {
+                    stats.notFound++;
+                }
+                updateStats();
+            }
+        }
+
+        function clearLog() {
+            logBody.innerHTML = '';
+            logEmpty.style.display = 'flex';
+            logBody.appendChild(logEmpty);
         }
 
         async function startSearch() {
-            const fileInput = document.getElementById('excelFile');
             const file = fileInput.files[0];
+            if (!file) return addLog('Please select a file', 'error');
 
-            if (!file) {
-                addLog('Please select an Excel file', 'error');
-                return;
-            }
+            stats = { total: 0, found: 0, notFound: 0 };
+            updateStats();
 
-            // Disable start button, enable stop
-            document.getElementById('startBtn').disabled = true;
-            document.getElementById('stopBtn').disabled = false;
-            document.getElementById('progressSection').style.display = 'block';
-            document.getElementById('downloadSection').style.display = 'none';
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            document.getElementById('downloadSection').classList.remove('show');
+            clearLog();
 
-            // Clear previous logs
-            document.getElementById('logContainer').innerHTML = '';
-
-            sessionId = generateSessionId();
-
-            // Upload file and start search
+            sessionId = 'session_' + Date.now();
             const formData = new FormData();
             formData.append('file', file);
             formData.append('sessionId', sessionId);
 
-            addLog('Uploading Excel file...', 'info');
+            addLog('Starting search...', 'info');
 
             try {
-                const response = await fetch('/api/hepsiburada-barcode/search', {
-                    method: 'POST',
-                    body: formData
-                });
+                const response = await fetch('/api/hepsiburada-barcode/search', { method: 'POST', body: formData });
+                if (!response.ok) throw new Error('Server error');
 
-                if (!response.ok) {
-                    throw new Error('HTTP error! status: ' + response.status);
-                }
-
-                // Read SSE from response body
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
 
@@ -136,94 +421,82 @@
                     const { done, value } = await reader.read();
                     if (done) break;
 
-                    const text = decoder.decode(value);
-                    const lines = text.split('\n');
-
+                    const lines = decoder.decode(value).split('\n');
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
                             try {
-                                const data = JSON.parse(line.substring(6));
+                                const data = JSON.parse(line.slice(6));
                                 handleProgress(data);
-                            } catch (e) {
-                                // Skip non-JSON lines
-                            }
+                            } catch (e) {}
                         }
                     }
                 }
-
-                resetButtons();
-
-            } catch (error) {
-                addLog('Error: ' + error.message, 'error');
-                resetButtons();
+            } catch (err) {
+                addLog('Error: ' + err.message, 'error');
             }
+
+            resetButtons();
         }
 
         function handleProgress(data) {
-            // Update progress bar
             const progress = data.progress || 0;
-            document.getElementById('progressFill').style.width = progress + '%';
-            document.getElementById('progressText').textContent = progress + '%';
+            document.getElementById('progressBar').style.width = progress + '%';
+            document.getElementById('progressPercent').textContent = progress + '%';
 
-            // Add log entry
-            if (data.message) {
-                addLog(data.message, data.type || 'info');
+            // Update stats from server data if provided
+            if (data.total !== undefined) stats.total = data.total;
+            if (data.found !== undefined) stats.found = data.found;
+            if (data.notFound !== undefined) stats.notFound = data.notFound;
+            
+            // Calculate notFound if we have total and found
+            if (data.total !== undefined && data.found !== undefined && data.notFound === undefined) {
+                stats.notFound = stats.total - stats.found;
             }
+            updateStats();
 
-            // Check for completion
+            if (data.message) addLog(data.message, data.type || 'info');
+
             if (data.type === 'complete') {
                 try {
-                    const completeData = JSON.parse(data.message);
-                    if (completeData.downloadUrl) {
-                        document.getElementById('downloadSection').style.display = 'block';
-                        document.getElementById('downloadLink').href = completeData.downloadUrl;
-                        document.getElementById('downloadLink').textContent = 'Download Results (' + completeData.foundCount + ' found)';
+                    const result = JSON.parse(data.message);
+                    if (result.downloadUrl) {
+                        // Use server's totalCount if available
+                        const totalSearched = result.totalCount || stats.total;
+                        stats.found = result.foundCount || stats.found;
+                        stats.total = totalSearched;
+                        stats.notFound = totalSearched - stats.found;
+                        updateStats();
+                        
+                        document.getElementById('downloadSection').classList.add('show');
+                        document.getElementById('downloadMessage').textContent = `${stats.found} products found out of ${stats.total} searched`;
+                        document.getElementById('downloadLink').href = result.downloadUrl;
                     }
-                } catch (e) {
-                    // Not JSON, just a message
-                }
-                resetButtons();
+                } catch (e) {}
             }
         }
 
         async function stopSearch() {
             if (sessionId) {
-                try {
-                    await fetch('/api/hepsiburada-barcode/stop?sessionId=' + sessionId, { method: 'POST' });
-                    addLog('Search stopped by user', 'warning');
-                } catch (e) {
-                    console.error('Error stopping search:', e);
-                }
+                await fetch('/api/hepsiburada-barcode/stop?sessionId=' + sessionId, { method: 'POST' });
+                addLog('Search stopped', 'warning');
             }
             resetButtons();
         }
 
         function resetForm() {
-            document.getElementById('excelFile').value = '';
-            document.getElementById('logContainer').innerHTML = '';
-            document.getElementById('progressFill').style.width = '0%';
-            document.getElementById('progressText').textContent = '0%';
-            document.getElementById('progressSection').style.display = 'none';
-            document.getElementById('downloadSection').style.display = 'none';
+            removeFile();
+            clearLog();
+            stats = { total: 0, found: 0, notFound: 0 };
+            updateStats();
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressPercent').textContent = '0%';
+            document.getElementById('downloadSection').classList.remove('show');
             resetButtons();
         }
 
         function resetButtons() {
-            document.getElementById('startBtn').disabled = false;
-            document.getElementById('stopBtn').disabled = true;
-        }
-
-        function addLog(message, type) {
-            type = type || 'info';
-            const container = document.getElementById('logContainer');
-            const entry = document.createElement('div');
-            entry.className = 'log-entry log-' + type;
-            
-            const time = new Date().toLocaleTimeString();
-            entry.textContent = '[' + time + '] ' + message;
-            
-            container.appendChild(entry);
-            container.scrollTop = container.scrollHeight;
+            startBtn.disabled = !fileInput.files[0];
+            stopBtn.disabled = true;
         }
     </script>
 </body>

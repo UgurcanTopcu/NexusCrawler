@@ -6,10 +6,6 @@ using System.Collections.Concurrent;
 
 namespace Scrapper.Services;
 
-/// <summary>
-/// Service to process bulk image uploads from Excel
-/// Downloads images, resizes to 1000x1000, uploads to CDN, returns new URLs
-/// </summary>
 public class BulkImageProcessingService
 {
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _sessions = new();
@@ -18,10 +14,7 @@ public class BulkImageProcessingService
     public static void StopSession(string sessionId)
     {
         if (_sessions.TryRemove(sessionId, out var cts))
-        {
             cts.Cancel();
-            Console.WriteLine($"[BulkImage] Session {sessionId} cancelled");
-        }
     }
 
     public async Task ProcessExcelAsync(
@@ -32,10 +25,7 @@ public class BulkImageProcessingService
     {
         var cts = new CancellationTokenSource();
         if (!string.IsNullOrEmpty(sessionId))
-        {
             _sessions[sessionId] = cts;
-        }
-        var cancellationToken = cts.Token;
 
         HttpClient? httpClient = null;
 
@@ -43,7 +33,6 @@ public class BulkImageProcessingService
         {
             await onProgress(1, "📖 Reading Excel file...", "info");
 
-            // Step 1: Read Excel
             var reader = new BulkImageExcelReader();
             var excelData = reader.ReadExcel(excelStream, hasHeader);
 
@@ -88,7 +77,7 @@ public class BulkImageProcessingService
 
             foreach (var imageCell in excelData.ImageCells)
             {
-                if (cancellationToken.IsCancellationRequested)
+                if (cts.Token.IsCancellationRequested)
                 {
                     await onProgress((int)currentProgress, "⏹️ Processing stopped by user", "warning");
                     break;

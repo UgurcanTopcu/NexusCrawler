@@ -5,16 +5,12 @@ namespace Scrapper.Services;
 
 public class TrendyolScraperService
 {
-    // Store cancellation tokens by session ID
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _sessions = new();
     
     public static void StopSession(string sessionId)
     {
         if (_sessions.TryRemove(sessionId, out var cts))
-        {
             cts.Cancel();
-            Console.WriteLine($"[TrendyolService] Session {sessionId} cancelled");
-        }
     }
     
     public async Task ScrapeWithProgressAsync(
@@ -27,21 +23,15 @@ public class TrendyolScraperService
         Func<int, string, string, Task> onProgress,
         string? sessionId = null)
     {
-        // Create cancellation token for this session
         var cts = new CancellationTokenSource();
         if (!string.IsNullOrEmpty(sessionId))
-        {
             _sessions[sessionId] = cts;
-        }
-        var cancellationToken = cts.Token;
         
         var products = new List<ProductInfo>();
         int skippedNoBarcodeCount = 0;
         
         try
         {
-            // No limit - users can scrape as many products as they want
-            
             var methodName = scrapeMethod == ScrapeMethod.ScrapeDo ? "Scrape.do API" : "Selenium";
             await onProgress(0, $"Initializing scraper ({methodName})...", "info");
             
@@ -89,7 +79,7 @@ public class TrendyolScraperService
             for (int i = 0; i < linksToProcess.Count; i++)
             {
                 // Check for cancellation
-                if (cancellationToken.IsCancellationRequested)
+                if (cts.Token.IsCancellationRequested)
                 {
                     await onProgress((int)currentProgress, $"Stopped at product {i}/{linksToProcess.Count}", "warning");
                     break;
@@ -121,7 +111,7 @@ public class TrendyolScraperService
                     await onProgress((int)currentProgress, $"Scraped: {displayNameSuccess}", "success");
                     
                     // Process images
-                    if (processImages && imageService != null && !cancellationToken.IsCancellationRequested)
+                    if (processImages && imageService != null && !cts.Token.IsCancellationRequested)
                     {
                         try
                         {
@@ -163,7 +153,7 @@ public class TrendyolScraperService
             if (products.Count > 0)
             {
                 var finalProgress = 90;
-                var stoppedText = cancellationToken.IsCancellationRequested ? " (stopped early)" : "";
+                var stoppedText = cts.Token.IsCancellationRequested ? " (stopped early)" : "";
                 var skippedText = skippedNoBarcodeCount > 0 ? $" ({skippedNoBarcodeCount} skipped - no barcode)" : "";
                 await onProgress(finalProgress, $"Scraped {products.Count} products{stoppedText}{skippedText}. Creating Excel...", "info");
                 

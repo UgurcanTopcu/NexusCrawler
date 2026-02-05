@@ -17,24 +17,15 @@ public class FtpUploadService
         {
             try
             {
-                Console.WriteLine($"\n[FTP] ========== UPLOAD START ==========");
-                Console.WriteLine($"[FTP] File: {fileName}");
-                Console.WriteLine($"[FTP] Size: {imageData.Length} bytes");
-                Console.WriteLine($"[FTP] Site: {site}");
-                Console.WriteLine($"[FTP] Product ID: {productId}");
-                Console.WriteLine($"[FTP] Host: {_config.Host}:{_config.Port}");
-                Console.WriteLine($"[FTP] User: {_config.Username}");
-                
-                // Setup session options - EXACTLY like Filestash
                 WinSCP.SessionOptions sessionOptions = new WinSCP.SessionOptions
                 {
-                    Protocol = WinSCP.Protocol.Ftp,  // Plain FTP
+                    Protocol = WinSCP.Protocol.Ftp,
                     HostName = _config.Host,
                     PortNumber = _config.Port,
                     UserName = _config.Username,
                     Password = _config.Password,
-                    FtpMode = WinSCP.FtpMode.Passive,  // PASV mode
-                    FtpSecure = WinSCP.FtpSecure.None,  // No encryption
+                    FtpMode = WinSCP.FtpMode.Passive,
+                    FtpSecure = WinSCP.FtpSecure.None,
                     Timeout = TimeSpan.FromSeconds(30)
                 };
                 

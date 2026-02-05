@@ -15,11 +15,10 @@ public class BulkImageExcelExporter
     {
         try
         {
-            Console.WriteLine($"[BulkImageExporter] ========================================");
-            Console.WriteLine($"[BulkImageExporter] Creating Excel: {filePath}");
-            Console.WriteLine($"[BulkImageExporter] Rows: {excelData.AllCells.Count}, Columns: {excelData.TotalColumns}");
-            Console.WriteLine($"[BulkImageExporter] Image columns: {excelData.ImageColumns.Count} ({string.Join(", ", excelData.ImageColumns.OrderBy(x => x))})");
-            Console.WriteLine($"[BulkImageExporter] Processed images: {excelData.ImageCells.Count}");
+
+
+
+
 
             using var package = new ExcelPackage();
             var worksheet = package.Workbook.Worksheets.Add("Processed Images");
@@ -65,8 +64,6 @@ public class BulkImageExcelExporter
                     cell.Style.Fill.BackgroundColor.SetColor(Color.LightGreen);
                     cell.Style.Font.Color.SetColor(Color.DarkGreen);
                     successCount++;
-                    
-                    Console.WriteLine($"[BulkImageExporter] ? Row {imageCell.Row}, Col {imageCell.Column}: {imageCell.CdnUrl.Substring(0, Math.Min(50, imageCell.CdnUrl.Length))}...");
                 }
                 else if (imageCell.IsProcessed && !string.IsNullOrEmpty(imageCell.Error))
                 {
@@ -80,8 +77,6 @@ public class BulkImageExcelExporter
                     var comment = cell.AddComment($"? Error: {imageCell.Error}\n\nOriginal URL kept: {imageCell.OriginalUrl}");
                     comment.AutoFit = true;
                     failCount++;
-                    
-                    Console.WriteLine($"[BulkImageExporter] ? Row {imageCell.Row}, Col {imageCell.Column}: {imageCell.Error}");
                 }
             }
 
@@ -230,15 +225,12 @@ public class BulkImageExcelExporter
             var file = new FileInfo(filePath);
             package.SaveAs(file);
 
-            Console.WriteLine($"[BulkImageExporter] ? Excel saved successfully");
-            Console.WriteLine($"[BulkImageExporter] ?? Success: {successCount}, Failed: {failCount}");
-            Console.WriteLine($"[BulkImageExporter] ?? File: {filePath}");
-            Console.WriteLine($"[BulkImageExporter] ========================================");
+
+
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[BulkImageExporter] ? Error: {ex.Message}");
-            Console.WriteLine($"[BulkImageExporter] Stack trace: {ex.StackTrace}");
+
             throw;
         }
     }

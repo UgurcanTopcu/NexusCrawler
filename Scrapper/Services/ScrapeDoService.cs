@@ -29,8 +29,7 @@ public class ScrapeDoService
     public async Task<List<string>> GetProductLinksAsync(string categoryUrl, int maxProducts = 50, bool isHepsiburada = false)
     {
         var platform = isHepsiburada ? "Hepsiburada" : "Trendyol";
-        Console.WriteLine($"\n[{platform}] Starting product discovery (Scrape.do)...");
-        Console.WriteLine($"[{platform}] Target: {maxProducts} products");
+
         
         var productLinks = new List<string>();
         
@@ -69,13 +68,9 @@ public class ScrapeDoService
                     }
                 }
                 
-                Console.WriteLine($"[{platform}] Page {page}: {paginatedUrl}");
-                
                 var html = await GetPageHtmlAsync(paginatedUrl);
                 var htmlDoc = new HtmlAgilityPack.HtmlDocument();
                 htmlDoc.LoadHtml(html);
-                
-                Console.WriteLine($"[{platform}] HTML length: {html.Length} chars");
                 
                 int linksBeforePage = productLinks.Count;
                 
@@ -106,7 +101,6 @@ public class ScrapeDoService
                 {
                     // Get ALL links, we'll filter them properly
                     linkNodes = htmlDoc.DocumentNode.SelectNodes("//a[@href]");
-                    Console.WriteLine($"[{platform}] Total <a> tags: {linkNodes?.Count ?? 0}");
                 }
                 else
                 {
@@ -116,7 +110,6 @@ public class ScrapeDoService
                 
                 if (linkNodes != null && linkNodes.Count > 0)
                 {
-                    Console.WriteLine($"[{platform}] Processing {linkNodes.Count} links...");
                     
                     int candidateCount = 0;
                     int rejectedCategory = 0;
@@ -143,8 +136,6 @@ public class ScrapeDoService
                                 // Decode HTML entities first
                                 var decodedHref = System.Net.WebUtility.HtmlDecode(fullUrl);
                                 
-                                Console.WriteLine($"[{platform}] Found adservice link, decoding...");
-                                
                                 // Extract redirect parameter using Uri and query parsing
                                 var adUri = new Uri(decodedHref);
                                 var queryParams = System.Web.HttpUtility.ParseQueryString(adUri.Query);
@@ -156,8 +147,6 @@ public class ScrapeDoService
                                     // But we need to clean it - remove query params from the product URL itself
                                     cleanUrl = redirectParam.Split('?')[0].Split('#')[0];
                                     
-                                    Console.WriteLine($"[{platform}] Ad redirect extracted: {cleanUrl}");
-                                    
                                     // Check if it's a valid product URL
                                     if (cleanUrl.Contains("-p-") && !cleanUrl.Contains("-c-") && !productLinks.Contains(cleanUrl))
                                     {
@@ -167,19 +156,16 @@ public class ScrapeDoService
                                         
                                         if (productLinks.Count <= 10)
                                         {
-                                            Console.WriteLine($"[{platform}] #{productLinks.Count}: {cleanUrl} (from ad)");
                                         }
                                     }
                                     continue;
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[{platform}] No redirect param found in: {decodedHref.Substring(0, Math.Min(100, decodedHref.Length))}...");
                                 }
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"[{platform}] Error extracting ad redirect: {ex.Message}");
                             }
                         }
                         
@@ -253,7 +239,6 @@ public class ScrapeDoService
                                 // Log first few rejections
                                 if (rejectedNoPattern <= 5)
                                 {
-                                    Console.WriteLine($"[{platform}] REJECTED (no pattern): {cleanUrl}");
                                 }
                             }
                         }
@@ -270,26 +255,21 @@ public class ScrapeDoService
                             
                             if (productLinks.Count <= 10)
                             {
-                                Console.WriteLine($"[{platform}] #{productLinks.Count}: {cleanUrl}");
                             }
                         }
                     }
                     
                     var adInfo = fromAdRedirects > 0 ? $" (including {fromAdRedirects} from ads)" : "";
-                    Console.WriteLine($"[{platform}] Found {candidateCount} new product links{adInfo} from {linkNodes.Count} total links");
-                    Console.WriteLine($"[{platform}] Rejected: Category={rejectedCategory}, NoPattern={rejectedNoPattern}");
+
                 }
                 else
                 {
-                    Console.WriteLine($"[{platform}] ? No links found in HTML!");
                 }
                 
                 int newLinks = productLinks.Count - linksBeforePage;
-                Console.WriteLine($"[{platform}] Page {page}: +{newLinks} new | Total: {productLinks.Count}/{maxProducts}");
                 
                 if (productLinks.Count >= maxProducts)
                 {
-                    Console.WriteLine($"[{platform}] ? Target reached!");
                     break;
                 }
                 
@@ -298,7 +278,6 @@ public class ScrapeDoService
                     emptyPageCount++;
                     if (emptyPageCount >= 2)
                     {
-                        Console.WriteLine($"[{platform}] ? End of available products");
                         break;
                     }
                 }
@@ -312,14 +291,11 @@ public class ScrapeDoService
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{platform}] Error on page {page}: {ex.Message}");
                 emptyPageCount++;
                 if (emptyPageCount >= 2) break;
                 page++;
             }
         }
-        
-        Console.WriteLine($"\n[{platform}] ? Total: {productLinks.Count} products from {page - 1} pages\n");
 
         return productLinks;
     }

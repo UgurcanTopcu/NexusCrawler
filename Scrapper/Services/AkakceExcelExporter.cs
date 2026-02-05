@@ -17,23 +17,18 @@ public class AkakceExcelExporter
     {
         try
         {
-            Console.WriteLine($"\n[Akakce Export] ========== EXPORT START ==========");
-            Console.WriteLine($"[Akakce Export] Creating Excel file: {filePath}");
-            Console.WriteLine($"[Akakce Export] Products to export: {products.Count}");
+
+
             
             // Check if any products have variants
             int productsWithVariants = products.Count(p => p.HasVariants);
             if (productsWithVariants > 0)
             {
-                Console.WriteLine($"[Akakce Export] Products with variants: {productsWithVariants}");
-                Console.WriteLine($"[Akakce Export] Total variants: {products.Sum(p => p.Variants.Count)}");
+
             }
-            
-            Console.WriteLine($"[Akakce Export] Total sellers across all products: {products.Sum(p => p.Sellers.Count)}");
 
             if (products.Count == 0)
             {
-                Console.WriteLine($"[Akakce Export] WARNING: No products to export!");
                 throw new Exception("No products data to export");
             }
 
@@ -41,49 +36,39 @@ public class AkakceExcelExporter
             if (products.Count > 0)
             {
                 var first = products[0];
-                Console.WriteLine($"[Akakce Export] First product: {first.Name}");
-                Console.WriteLine($"[Akakce Export] First product sellers: {first.Sellers.Count}");
-                Console.WriteLine($"[Akakce Export] First product variants: {first.Variants.Count}");
-                Console.WriteLine($"[Akakce Export] First product URL: {first.ProductUrl}");
+
+
+
             }
 
             // EPPlus license already set in Program.cs
             using var package = new ExcelPackage();
 
             // Sheet 1: Product Summary
-            Console.WriteLine($"[Akakce Export] Creating Products Summary sheet...");
             CreateProductSummarySheet(package, products);
 
             // Sheet 2: Variants (if any products have variants)
             if (productsWithVariants > 0)
             {
-                Console.WriteLine($"[Akakce Export] Creating Variants sheet...");
                 CreateVariantsSheet(package, products);
             }
 
             // Sheet 3: All Sellers (flat list)
-            Console.WriteLine($"[Akakce Export] Creating All Sellers sheet...");
             CreateSellersSheet(package, products);
 
             // Sheet 4: Detailed view (one row per seller with product info)
-            Console.WriteLine($"[Akakce Export] Creating Detailed View sheet...");
             CreateDetailedSheet(package, products);
 
             // Save
             var file = new FileInfo(filePath);
-            Console.WriteLine($"[Akakce Export] Saving to: {file.FullName}");
             package.SaveAs(file);
 
-            Console.WriteLine($"[Akakce Export] SUCCESS: File saved with {package.Workbook.Worksheets.Count} sheets");
-            Console.WriteLine($"[Akakce Export] ========== EXPORT END ==========\n");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"\n[Akakce Export] ERROR: {ex.Message}");
-            Console.WriteLine($"[Akakce Export] Stack: {ex.StackTrace}");
+
             if (ex.InnerException != null)
             {
-                Console.WriteLine($"[Akakce Export] Inner Exception: {ex.InnerException.Message}");
             }
             throw;
         }
@@ -160,12 +145,9 @@ public class AkakceExcelExporter
 
             // Freeze header row
             ws.View.FreezePanes(2, 1);
-            
-            Console.WriteLine($"[Akakce Export] Products Summary: {products.Count} rows created");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce Export] Error in CreateProductSummarySheet: {ex.Message}");
             throw;
         }
     }
@@ -241,12 +223,9 @@ public class AkakceExcelExporter
 
             // Freeze header row
             ws.View.FreezePanes(2, 1);
-            
-            Console.WriteLine($"[Akakce Export] Variants: {variantCount} rows created");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce Export] Error in CreateVariantsSheet: {ex.Message}");
             throw;
         }
     }
@@ -381,12 +360,9 @@ public class AkakceExcelExporter
             }
 
             ws.View.FreezePanes(2, 1);
-            
-            Console.WriteLine($"[Akakce Export] All Sellers: {sellerCount} rows created");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce Export] Error in CreateSellersSheet: {ex.Message}");
             throw;
         }
     }
@@ -497,12 +473,9 @@ public class AkakceExcelExporter
             }
 
             ws.View.FreezePanes(2, 1);
-            
-            Console.WriteLine($"[Akakce Export] Detailed View: {detailCount} rows created");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce Export] Error in CreateDetailedSheet: {ex.Message}");
             throw;
         }
     }

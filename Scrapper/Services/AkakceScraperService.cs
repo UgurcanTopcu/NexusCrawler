@@ -3,40 +3,22 @@ using System.Collections.Concurrent;
 
 namespace Scrapper.Services;
 
-/// <summary>
-/// Orchestrates the Akakce scraping workflow: read URLs, scrape, export
-/// NOTE: Akakce uses Cloudflare protection, so we ALWAYS use Selenium regardless of user selection
-/// </summary>
 public class AkakceScraperService
 {
-    // Store cancellation tokens by session ID
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _sessions = new();
     private static readonly Random _random = new Random();
     
-    // Minimum delay between products - reduced for faster scraping
-    private const int MIN_DELAY_BETWEEN_PRODUCTS_MS = 2000; // Reduced from 3000
-    private const int MAX_DELAY_BETWEEN_PRODUCTS_MS = 4000; // Reduced from 6000
-    
-    // Max retries for a single product before skipping
+    private const int MIN_DELAY_BETWEEN_PRODUCTS_MS = 2000;
+    private const int MAX_DELAY_BETWEEN_PRODUCTS_MS = 4000;
     private const int MAX_PRODUCT_RETRIES = 2;
-    
-    // Cooldown after Cloudflare block
     private const int CLOUDFLARE_COOLDOWN_MS = 30000;
     
     public static void StopSession(string sessionId)
     {
         if (_sessions.TryRemove(sessionId, out var cts))
-        {
             cts.Cancel();
-            Console.WriteLine($"[AkakceService] Session {sessionId} cancelled");
-        }
     }
     
-    /// <summary>
-    /// Process a category URL - extract product URLs then scrape each
-    /// </summary>
-    /// <param name="startFrom">Start scraping from this product number (1-based index). Products before this will be skipped.</param>
-    /// <param name="scanVariants">Whether to scan all product variants (storage, color options, etc.)</param>
     public async Task ProcessCategoryUrlAsync(
         string categoryUrl,
         int maxProducts,
@@ -45,13 +27,9 @@ public class AkakceScraperService
         int startFrom = 1,
         bool scanVariants = false)
     {
-        // Create cancellation token for this session
         var cts = new CancellationTokenSource();
         if (!string.IsNullOrEmpty(sessionId))
-        {
             _sessions[sessionId] = cts;
-        }
-        var cancellationToken = cts.Token;
         
         var products = new List<AkakceProductInfo>();
         AkakceScraper? scraper = null;
@@ -122,8 +100,7 @@ public class AkakceScraperService
             
             for (int i = 0; i < urlsToScrape.Count; i++)
             {
-                // Check for cancellation
-                if (cancellationToken.IsCancellationRequested)
+                if (cts.Token.IsCancellationRequested)
                 {
                     await onProgress((int)currentProgress, $"⏹️ Stopped at product {startFrom + i}/{productUrls.Count}", "warning");
                     break;
@@ -247,7 +224,7 @@ public class AkakceScraperService
             // Step 3: Export results
             if (products.Count > 0)
             {
-                var stoppedText = cancellationToken.IsCancellationRequested ? " (stopped early)" : "";
+                var stoppedText = cts.Token.IsCancellationRequested ? " (stopped early)" : "";
                 await onProgress(95, $"📊 Creating Excel report{stoppedText}...", "info");
                 
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -323,11 +300,6 @@ public class AkakceScraperService
         }
     }
     
-    /// <summary>
-    /// Process an uploaded Excel file with Akakce URLs
-    /// </summary>
-    /// <param name="startFrom">Start scraping from this row number (1-based index). URLs before this will be skipped.</param>
-    /// <param name="scanVariants">Whether to scan all product variants (storage, color options, etc.)</param>
     public async Task ProcessExcelFileAsync(
         Stream excelStream,
         ScrapeMethod scrapeMethod,
@@ -336,13 +308,9 @@ public class AkakceScraperService
         int startFrom = 1,
         bool scanVariants = false)
     {
-        // Create cancellation token for this session
         var cts = new CancellationTokenSource();
         if (!string.IsNullOrEmpty(sessionId))
-        {
             _sessions[sessionId] = cts;
-        }
-        var cancellationToken = cts.Token;
         
         var products = new List<AkakceProductInfo>();
         AkakceScraper? scraper = null;
@@ -366,9 +334,6 @@ public class AkakceScraperService
             var urlColumn = reader.DetectUrlColumn(excelStream, hasHeader: true);
             excelStream.Position = 0;
             var urls = reader.ReadUrlsFromStream(excelStream, urlColumn, hasHeader: true);
-            
-            Console.WriteLine($"\n[AkakceService] ========== SCRAPING SESSION START ==========");
-            Console.WriteLine($"[AkakceService] Total URLs found: {urls.Count}");
             
             if (urls.Count == 0)
             {
@@ -416,8 +381,7 @@ public class AkakceScraperService
 
             for (int i = 0; i < urlsToScrape.Count; i++)
             {
-                // Check for cancellation
-                if (cancellationToken.IsCancellationRequested)
+                if (cts.Token.IsCancellationRequested)
                 {
                     await onProgress((int)currentProgress, $"⏹️ Stopped at row #{startFrom + i}/{urls.Count}", "warning");
                     break;
@@ -529,15 +493,9 @@ public class AkakceScraperService
                 currentProgress += progressPerProduct;
             }
 
-            Console.WriteLine($"\n[AkakceService] ========== SCRAPING COMPLETE ==========");
-            Console.WriteLine($"[AkakceService] Total products: {products.Count}");
-            Console.WriteLine($"[AkakceService] Successful: {successCount}");
-            Console.WriteLine($"[AkakceService] Skipped: {skippedCount}");
-
-            // Step 3: Export results (even if stopped early)
             if (products.Count > 0)
             {
-                var stoppedText = cancellationToken.IsCancellationRequested ? " (stopped early)" : "";
+                var stoppedText = cts.Token.IsCancellationRequested ? " (stopped early)" : "";
                 await onProgress(95, $"📊 Creating Excel report{stoppedText}...", "info");
 
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");

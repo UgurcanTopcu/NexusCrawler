@@ -3,236 +3,601 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Akakce Scraper - Price Comparison</title>
-    <link rel="stylesheet" href="/css/styles.css">
-</head>
-<body data-theme="pink">
-    <div class="container">
-        <h1>&#128176; Akakce Scraper</h1>
-        <p class="subtitle">Compare prices across multiple sellers from Akakce</p>
+    <title>Akakce Lead Generation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
-        <div class="nav-buttons">
-            <div class="nav-btn" onclick="navigateTo('/')">
-                <h3>&#128722; Category Scraper</h3>
-                <p>Trendyol &amp; Hepsiburada</p>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+            min-height: 100vh;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+
+        .app-container { max-width: 900px; margin: 0 auto; }
+
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+        .header p { color: #94a3b8; font-size: 15px; }
+
+        .nav-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 30px; }
+
+        .nav-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 14px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .nav-item:hover { background: rgba(236, 72, 153, 0.15); border-color: rgba(236, 72, 153, 0.3); transform: translateY(-2px); }
+        .nav-item.active { background: rgba(236, 72, 153, 0.2); border-color: #ec4899; }
+        .nav-item h3 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .nav-item p { font-size: 11px; color: #94a3b8; }
+
+        .card {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .card-body { padding: 20px; }
+
+        /* Mode Toggle - 3 options */
+        .mode-toggle { display: flex; gap: 10px; margin-bottom: 20px; }
+        
+        .mode-btn {
+            flex: 1;
+            padding: 14px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            color: #94a3b8;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .mode-btn:hover { background: rgba(236, 72, 153, 0.1); }
+        .mode-btn.active { background: rgba(236, 72, 153, 0.2); border-color: #ec4899; color: #f9a8d4; }
+
+        .input-section { display: none; }
+        .input-section.active { display: block; }
+
+        .form-group { margin-bottom: 16px; }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #f9a8d4;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            color: #e2e8f0;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .form-group input:focus { outline: none; border-color: #ec4899; background: rgba(236, 72, 153, 0.1); }
+        .input-hint { font-size: 12px; color: #64748b; margin-top: 6px; }
+
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed rgba(236, 72, 153, 0.3);
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: rgba(236, 72, 153, 0.05);
+        }
+
+        .upload-area:hover { border-color: rgba(236, 72, 153, 0.6); background: rgba(236, 72, 153, 0.1); }
+        .upload-area.has-file { border-color: #10b981; border-style: solid; background: rgba(16, 185, 129, 0.1); }
+        .upload-area.drag-over { border-color: #ec4899; background: rgba(236, 72, 153, 0.15); transform: scale(1.02); }
+
+        .upload-icon { font-size: 48px; margin-bottom: 16px; }
+        .upload-area h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: #e2e8f0; }
+        .upload-area p { font-size: 13px; color: #94a3b8; }
+
+        .file-selected { display: none; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; padding: 12px 16px; background: rgba(16, 185, 129, 0.15); border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .file-selected.show { display: flex; }
+        .file-selected .file-name { font-size: 14px; font-weight: 500; color: #10b981; }
+
+        .btn-remove { background: rgba(239, 68, 68, 0.2); border: none; color: #ef4444; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+        .btn-remove:hover { background: rgba(239, 68, 68, 0.4); }
+
+        .checkbox-item { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+        .checkbox-item input[type="checkbox"] { width: 18px; height: 18px; accent-color: #ec4899; }
+        .checkbox-item label { font-size: 14px; color: #e2e8f0; cursor: pointer; }
+
+        .example-box {
+            background: rgba(236, 72, 153, 0.1);
+            border: 1px solid rgba(236, 72, 153, 0.2);
+            border-radius: 10px;
+            padding: 14px;
+            font-size: 13px;
+            color: #f9a8d4;
+        }
+
+        .example-box strong { color: #fbcfe8; }
+
+        .action-buttons { display: flex; gap: 10px; margin-top: 20px; }
+
+        .btn {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: linear-gradient(135deg, #ec4899, #db2777); color: white; }
+        .btn-primary:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(236, 72, 153, 0.4); }
+        .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; display: none; }
+        .btn-danger.show { display: flex; }
+        .btn-secondary { background: rgba(255, 255, 255, 0.1); color: #e2e8f0; border: 1px solid rgba(255, 255, 255, 0.2); }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+
+        .progress-card { display: none; }
+        .progress-card.show { display: block; }
+
+        .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .progress-header span { font-size: 14px; color: #94a3b8; }
+        .progress-header .percent { font-size: 20px; font-weight: 700; color: #ec4899; }
+
+        .progress-track { height: 10px; background: rgba(236, 72, 153, 0.2); border-radius: 10px; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #ec4899, #db2777); border-radius: 10px; width: 0%; transition: width 0.3s ease; }
+
+        .log-body { max-height: 300px; overflow-y: auto; padding: 0; }
+        .log-body::-webkit-scrollbar { width: 6px; }
+        .log-body::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
+        .log-body::-webkit-scrollbar-thumb { background: rgba(236, 72, 153, 0.3); border-radius: 3px; }
+
+        .log-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; color: #64748b; }
+        .log-empty span { font-size: 36px; margin-bottom: 10px; opacity: 0.5; }
+
+        .log-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+        .log-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+        .log-item.success .log-icon { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .log-item.error .log-icon { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .log-item.warning .log-icon { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .log-item.info .log-icon { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+
+        .log-content { flex: 1; min-width: 0; }
+        .log-message { font-size: 13px; line-height: 1.5; word-break: break-word; }
+
+        .log-item.success .log-message { color: #10b981; }
+        .log-item.error .log-message { color: #f87171; }
+        .log-item.warning .log-message { color: #fbbf24; }
+        .log-item.info .log-message { color: #e2e8f0; }
+
+        .log-time { font-size: 11px; color: #64748b; flex-shrink: 0; }
+
+        .btn-clear { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+        .btn-clear:hover { background: rgba(239, 68, 68, 0.2); }
+
+        .download-link { display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 12px 24px; border-radius: 10px; text-decoration: none; font-weight: 600; margin: 16px 20px; }
+        .download-link:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4); }
+
+        .footer { text-align: center; margin-top: 30px; }
+        .footer a { color: #ec4899; text-decoration: none; font-size: 14px; }
+        .footer a:hover { color: #f9a8d4; }
+
+        @media (max-width: 768px) {
+            .nav-grid { grid-template-columns: repeat(2, 1fr); }
+            .mode-toggle { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <h1>💰 Akakce Lead Generation</h1>
+            <p>Compare prices and find sellers across Akakce</p>
+        </div>
+
+        <div class="nav-grid">
+            <div class="nav-item" onclick="location.href='/'">
+                <h3>🛒 Category Scraper</h3>
+                <p>Trendyol & Hepsiburada</p>
             </div>
-            <div class="nav-btn active">
-                <h3>&#128176; Akakce Scraper</h3>
+            <div class="nav-item active">
+                <h3>💰 Akakce Lead Gen</h3>
                 <p>Price Comparison</p>
             </div>
-            <div class="nav-btn" onclick="navigateTo('/akakce-search')">
-                <h3>&#128269; Akakce Search</h3>
-                <p>Search by Name</p>
+            <div class="nav-item" onclick="location.href='/hepsiburada-barcode'">
+                <h3>📊 Mirakl Catalogue</h3>
+                <p>Catalogue Analysis</p>
             </div>
-            <div class="nav-btn" onclick="navigateTo('/bulk-image')">
-                <h3>&#128444;&#65039; Bulk Image Uploader</h3>
-                <p>Process &amp; Upload Images</p>
+            <div class="nav-item" onclick="location.href='/bulk-image'">
+                <h3>🖼️ Image Resizing</h3>
+                <p>Bulk Processing</p>
             </div>
         </div>
-        
-        <form id="akakceForm">
-            <!-- Input Mode Toggle -->
-            <div class="mode-toggle">
-                <div class="mode-btn active" onclick="setMode('url')" id="modeUrl">Category URL</div>
-                <div class="mode-btn" onclick="setMode('file')" id="modeFile">Excel File</div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>⚙️ Scraper Settings</h2>
             </div>
-            
-            <!-- URL Input Section -->
-            <div class="input-section active" id="urlSection">
-                <div class="form-group">
-                    <label for="categoryUrl">Akakce Category URL</label>
-                    <input type="text" id="categoryUrl" 
-                        placeholder="https://www.akakce.com/laptop-notebook.html"
-                        value="https://www.akakce.com/laptop-notebook.html">
-                    <div class="input-hint">Enter an Akakce category page URL to scrape all products</div>
+            <div class="card-body">
+                <div class="mode-toggle">
+                    <div class="mode-btn active" id="modeUrl" onclick="setMode('url')">🔗 Category URL</div>
+                    <div class="mode-btn" id="modeFile" onclick="setMode('file')">📄 Product URLs (Excel)</div>
+                    <div class="mode-btn" id="modeSearch" onclick="setMode('search')">🔍 Search by Name</div>
                 </div>
-                
-                <div class="form-group">
-                    <label for="maxProducts">Maximum Products</label>
-                    <input type="number" id="maxProducts" min="1" value="20">
-                    <div class="input-hint">Enter any number - no limit</div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="startFrom">Start From</label>
-                    <input type="number" id="startFrom" min="1" value="1">
-                    <div class="input-hint">Start scraping from this product number</div>
-                </div>
-                
-                <div class="form-group">
-                    <div class="checkbox-label">
-                        <input type="checkbox" id="scanVariants" name="scanVariants">
-                        <label for="scanVariants">Scan All Product Variants (Storage, Color, etc.)</label>
-                    </div>
-                    <div class="input-hint">Warning: Increases scraping time significantly</div>
-                </div>
-                
-                <div class="example">
-                    <strong>Example Category URLs:</strong><br>
-                    - Laptops: https://www.akakce.com/laptop-notebook.html<br>
-                    - Phones: https://www.akakce.com/cep-telefonu.html<br>
-                    - TVs: https://www.akakce.com/televizyon.html
-                </div>
-            </div>
-            
-            <!-- File Upload Section -->
-            <div class="input-section" id="fileSection">
-                <div class="form-group">
-                    <label>Upload Excel File with Akakce Product URLs</label>
-                    <div class="file-upload" id="dropZone">
-                        <input type="file" id="excelFile" accept=".xlsx,.xls">
-                        <div class="icon">&#128193;</div>
-                        <div class="text">
-                            <strong>Click to upload</strong> or drag and drop<br>
-                            Excel file (.xlsx, .xls)
+
+                <form id="akakceForm">
+                    
+                    <div class="input-section active" id="urlSection">
+                        <div class="form-group">
+                            <label>Akakce Category URL</label>
+                            <input type="text" id="categoryUrl" 
+                                placeholder="https://www.akakce.com/laptop-notebook.html"
+                                value="https://www.akakce.com/laptop-notebook.html">
                         </div>
-                        <div class="filename" id="fileName"></div>
+
+                        <div class="form-group">
+                            <label>Maximum Products</label>
+                            <input type="number" id="maxProducts" min="1" value="20">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Start From</label>
+                            <input type="number" id="startFrom" min="1" value="1">
+                            <div class="input-hint">Start scraping from this product number</div>
+                        </div>
+
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="scanVariantsUrl">
+                            <label for="scanVariantsUrl">Scan All Product Variants (Storage, Color, etc.)</label>
+                        </div>
+
+                        <div class="example-box">
+                            <strong>Example Category URLs:</strong><br>
+                            • Laptops: https://www.akakce.com/laptop-notebook.html<br>
+                            • Phones: https://www.akakce.com/cep-telefonu.html<br>
+                            • TVs: https://www.akakce.com/televizyon.html
+                        </div>
                     </div>
-                    <div class="input-hint">Excel should have Akakce product URLs in the first column</div>
-                </div>
-                
-                <div class="form-group">
-                    <div class="checkbox-label">
-                        <input type="checkbox" id="scanVariantsFile" name="scanVariantsFile">
-                        <label for="scanVariantsFile">Scan All Product Variants (Storage, Color, etc.)</label>
+
+                    
+                    <div class="input-section" id="fileSection">
+                        <div class="upload-area" id="uploadAreaFile">
+                            <div class="upload-icon">📂</div>
+                            <h3 id="uploadTextFile">Drop file here or click to browse</h3>
+                            <p id="uploadHintFile">Excel with Akakce product URLs in column A</p>
+                            <input type="file" id="fileInputFile" accept=".xlsx,.xls" style="display:none">
+                        </div>
+                        <div class="file-selected" id="fileSelectedFile">
+                            <span>📄</span>
+                            <span class="file-name" id="fileNameFile"></span>
+                            <button type="button" class="btn-remove" onclick="removeFile('file', event)">✕</button>
+                        </div>
+
+                        <div class="checkbox-item" style="margin-top: 16px;">
+                            <input type="checkbox" id="scanVariantsFile">
+                            <label for="scanVariantsFile">Scan All Product Variants</label>
+                        </div>
+
+                        <div class="example-box">
+                            <strong>Expected Excel Format:</strong><br>
+                            Column A should contain product URLs like:<br>
+                            • https://www.akakce.com/cep-telefonu/en-ucuz-samsung-galaxy-s25-ultra-fiyati,917781807.html
+                        </div>
                     </div>
-                    <div class="input-hint">Warning: Increases scraping time significantly</div>
+
+                    
+                    <div class="input-section" id="searchSection">
+                        <div class="upload-area" id="uploadAreaSearch">
+                            <div class="upload-icon">📂</div>
+                            <h3 id="uploadTextSearch">Drop file here or click to browse</h3>
+                            <p id="uploadHintSearch">Excel with product names in column A</p>
+                            <input type="file" id="fileInputSearch" accept=".xlsx,.xls" style="display:none">
+                        </div>
+                        <div class="file-selected" id="fileSelectedSearch">
+                            <span>📄</span>
+                            <span class="file-name" id="fileNameSearch"></span>
+                            <button type="button" class="btn-remove" onclick="removeFile('search', event)">?</button>
+                        </div>
+
+                        <div class="checkbox-item" style="margin-top: 16px;">
+                            <input type="checkbox" id="scanVariantsSearch">
+                            <label for="scanVariantsSearch">Scan All Product Variants</label>
+                        </div>
+
+                        <div class="example-box">
+                            <strong>Expected Excel Format:</strong><br>
+                            Column A should contain product names like:<br>
+                            • iPhone 15 128GB<br>
+                            • Samsung Galaxy S24 Ultra<br>
+                            • Sony WH-1000XM5
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button type="submit" class="btn btn-primary" id="startBtn">
+                            <span>🚀</span> Start Scraping
+                        </button>
+                        <button type="button" class="btn btn-danger" id="stopBtn" onclick="handleStop()">
+                            <span>⛔</span> Stop
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="handleReset()">
+                            <span>🔄</span> Reset
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card progress-card" id="progressCard">
+            <div class="card-body">
+                <div class="progress-header">
+                    <span>Progress</span>
+                    <span class="percent" id="progressPercent">0%</span>
                 </div>
-                
-                <div class="example">
-                    <strong>Expected Excel Format:</strong><br>
-                    Column A should contain product URLs like:<br>
-                    - https://www.akakce.com/cep-telefonu/en-ucuz-samsung-galaxy-s25-ultra-fiyati,917781807.html
+                <div class="progress-track">
+                    <div class="progress-bar" id="progressBar"></div>
                 </div>
             </div>
-            
-            <div class="button-group">
-                <button type="submit" id="akakceStartBtn" class="btn-primary">Start Scraping</button>
-                <button type="button" id="akakceStopBtn" class="btn-stop" onclick="handleStop()">Stop</button>
-                <button type="button" id="akakceResetBtn" class="btn-reset" onclick="handleReset()">Reset</button>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>📋 Activity Log</h2>
+                <button class="btn-clear" onclick="clearLog()">Clear</button>
             </div>
-        </form>
-        
-        <div id="progress">
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill">0%</div>
+            <div class="log-body" id="logBody">
+                <div class="log-empty" id="logEmpty">
+                    <span>📋</span>
+                    <p>Configure settings and start scraping</p>
+                </div>
             </div>
-            <div id="status"></div>
+        </div>
+
+        <div class="footer">
+            <a href="/">← Back to Home</a>
         </div>
     </div>
-    
-    <script src="/js/scraper-common.js"></script>
+
     <script>
+        let isRunning = false;
+        let sessionId = null;
         let currentMode = 'url';
-        let selectedFile = null;
-        
+        let selectedFileUrl = null;
+        let selectedFileSearch = null;
+
+        // File upload setup
+        function setupUpload(areaId, inputId, textId, hintId, selectedId, nameId, type) {
+            const area = document.getElementById(areaId);
+            const input = document.getElementById(inputId);
+            
+            area.addEventListener('click', () => input.click());
+            area.addEventListener('dragover', (e) => { e.preventDefault(); area.classList.add('drag-over'); });
+            area.addEventListener('dragleave', () => area.classList.remove('drag-over'));
+            area.addEventListener('drop', (e) => {
+                e.preventDefault();
+                area.classList.remove('drag-over');
+                if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; handleFileChange(type); }
+            });
+            input.addEventListener('change', () => handleFileChange(type));
+        }
+
+        setupUpload('uploadAreaFile', 'fileInputFile', 'uploadTextFile', 'uploadHintFile', 'fileSelectedFile', 'fileNameFile', 'file');
+        setupUpload('uploadAreaSearch', 'fileInputSearch', 'uploadTextSearch', 'uploadHintSearch', 'fileSelectedSearch', 'fileNameSearch', 'search');
+
+        function handleFileChange(type) {
+            const input = document.getElementById(type === 'file' ? 'fileInputFile' : 'fileInputSearch');
+            const file = input.files[0];
+            if (file) {
+                if (type === 'file') selectedFileUrl = file;
+                else selectedFileSearch = file;
+                
+                const nameEl = document.getElementById(type === 'file' ? 'fileNameFile' : 'fileNameSearch');
+                const selectedEl = document.getElementById(type === 'file' ? 'fileSelectedFile' : 'fileSelectedSearch');
+                const textEl = document.getElementById(type === 'file' ? 'uploadTextFile' : 'uploadTextSearch');
+                const hintEl = document.getElementById(type === 'file' ? 'uploadHintFile' : 'uploadHintSearch');
+                const areaEl = document.getElementById(type === 'file' ? 'uploadAreaFile' : 'uploadAreaSearch');
+                
+                nameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                selectedEl.classList.add('show');
+                textEl.style.display = 'none';
+                hintEl.style.display = 'none';
+                areaEl.classList.add('has-file');
+                updateStartBtn();
+            }
+        }
+
+        function removeFile(type, e) {
+            if (e) e.stopPropagation();
+            const input = document.getElementById(type === 'file' ? 'fileInputFile' : 'fileInputSearch');
+            const selectedEl = document.getElementById(type === 'file' ? 'fileSelectedFile' : 'fileSelectedSearch');
+            const textEl = document.getElementById(type === 'file' ? 'uploadTextFile' : 'uploadTextSearch');
+            const hintEl = document.getElementById(type === 'file' ? 'uploadHintFile' : 'uploadHintSearch');
+            const areaEl = document.getElementById(type === 'file' ? 'uploadAreaFile' : 'uploadAreaSearch');
+            
+            input.value = '';
+            if (type === 'file') selectedFileUrl = null;
+            else selectedFileSearch = null;
+            
+            selectedEl.classList.remove('show');
+            textEl.style.display = 'block';
+            hintEl.style.display = 'block';
+            areaEl.classList.remove('has-file');
+            updateStartBtn();
+        }
+
         function setMode(mode) {
             currentMode = mode;
             document.getElementById('modeUrl').classList.toggle('active', mode === 'url');
             document.getElementById('modeFile').classList.toggle('active', mode === 'file');
+            document.getElementById('modeSearch').classList.toggle('active', mode === 'search');
             document.getElementById('urlSection').classList.toggle('active', mode === 'url');
             document.getElementById('fileSection').classList.toggle('active', mode === 'file');
-            
-            if (mode === 'url') {
-                document.getElementById('akakceStartBtn').disabled = false;
-            } else {
-                document.getElementById('akakceStartBtn').disabled = !selectedFile;
-            }
+            document.getElementById('searchSection').classList.toggle('active', mode === 'search');
+            updateStartBtn();
         }
-        
-        // Setup file upload
-        setupFileUpload('dropZone', 'excelFile', 'fileName', (file) => {
-            selectedFile = file;
-            if (currentMode === 'file') {
-                document.getElementById('akakceStartBtn').disabled = false;
-            }
-        });
-        
+
+        function updateStartBtn() {
+            const btn = document.getElementById('startBtn');
+            if (currentMode === 'url') btn.disabled = false;
+            else if (currentMode === 'file') btn.disabled = !selectedFileUrl;
+            else btn.disabled = !selectedFileSearch;
+        }
+
+        function addLog(message, type = 'info') {
+            const logBody = document.getElementById('logBody');
+            const logEmpty = document.getElementById('logEmpty');
+            if (logEmpty) logEmpty.style.display = 'none';
+            const iconMap = { success: '?', error: '?', warning: '!', info: '?' };
+            const item = document.createElement('div');
+            item.className = `log-item ${type}`;
+            item.innerHTML = `<div class="log-icon">${iconMap[type] || '?'}</div><div class="log-content"><div class="log-message">${message}</div></div><div class="log-time">${new Date().toLocaleTimeString()}</div>`;
+            logBody.appendChild(item);
+            logBody.scrollTop = logBody.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('logBody').innerHTML = '<div class="log-empty" id="logEmpty"><span>📋</span><p>Log cleared</p></div>';
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressPercent').textContent = percent + '%';
+        }
+
         function handleReset() {
-            if (getIsRunning()) handleStop();
-            selectedFile = null;
-            document.getElementById('excelFile').value = '';
-            document.getElementById('fileName').textContent = '';
-            document.getElementById('categoryUrl').value = 'https://www.akakce.com/laptop-notebook.html';
-            document.getElementById('maxProducts').value = '20';
-            document.getElementById('startFrom').value = '1';
-            document.getElementById('akakceStartBtn').disabled = false;
-            document.getElementById('akakceStartBtn').textContent = 'Start Scraping';
-            document.getElementById('akakceStopBtn').style.display = 'none';
-            resetProgressUI();
+            if (isRunning) handleStop();
+            document.getElementById('akakceForm').reset();
+            removeFile('file');
+            removeFile('search');
             setMode('url');
+            document.getElementById('progressCard').classList.remove('show');
+            document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Scraping';
+            document.getElementById('stopBtn').classList.remove('show');
+            updateProgress(0);
+            clearLog();
         }
-        
+
         async function handleStop() {
-            await stopOperation('/api/akakce/stop/');
-            document.getElementById('akakceStartBtn').disabled = false;
-            document.getElementById('akakceStartBtn').textContent = 'Start Scraping';
-            document.getElementById('akakceStopBtn').style.display = 'none';
-            addStatusMessage('Scraping stopped. Check for partial results below.', 'warning');
+            if (sessionId) await fetch('/api/akakce/stop/' + sessionId, { method: 'POST' });
+            isRunning = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Scraping';
+            document.getElementById('stopBtn').classList.remove('show');
+            addLog('Scraping stopped by user', 'warning');
         }
-        
+
         document.getElementById('akakceForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            document.getElementById('akakceStartBtn').disabled = true;
-            document.getElementById('akakceStartBtn').textContent = 'Processing...';
-            document.getElementById('akakceStopBtn').style.display = 'block';
-            showProgress(true);
-            document.getElementById('status').innerHTML = '<div class="status-item">Starting...</div>';
+            isRunning = true;
+            sessionId = 'session_' + Date.now();
             
-            let url, options;
-            
-            if (currentMode === 'url') {
-                const categoryUrl = document.getElementById('categoryUrl').value;
-                const maxProducts = document.getElementById('maxProducts').value;
-                const startFrom = document.getElementById('startFrom').value;
-                const scanVariants = document.getElementById('scanVariants').checked;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('startBtn').innerHTML = '<span>?</span> Scraping...';
+            document.getElementById('stopBtn').classList.add('show');
+            document.getElementById('progressCard').classList.add('show');
+            clearLog();
+            addLog('Starting Akakce scraper...', 'info');
+
+            try {
+                let response;
                 
-                url = '/api/akakce/scrape-category';
-                options = {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        categoryUrl: categoryUrl,
-                        maxProducts: parseInt(maxProducts),
-                        sessionId: getSessionId(),
-                        startFrom: parseInt(startFrom),
-                        scanVariants: scanVariants
-                    })
-                };
-            } else {
-                if (!selectedFile) return;
-                
-                const scanVariants = document.getElementById('scanVariantsFile').checked;
-                const formData = new FormData();
-                formData.append('file', selectedFile);
-                formData.append('scrapeMethod', 'Selenium');
-                formData.append('sessionId', getSessionId() || Date.now().toString());
-                formData.append('scanVariants', scanVariants.toString());
-                
-                url = '/api/akakce/scrape';
-                options = {
-                    method: 'POST',
-                    body: formData
-                };
-            }
-            
-            await startSseStream(url, options, {
-                onProgress: updateProgressBar,
-                onMessage: addStatusMessage,
-                onDownload: addDownloadLink,
-                onComplete: () => {
-                    document.getElementById('akakceStartBtn').disabled = false;
-                    document.getElementById('akakceStartBtn').textContent = 'Start Scraping';
-                    document.getElementById('akakceStopBtn').style.display = 'none';
-                },
-                onError: (message) => {
-                    document.getElementById('status').innerHTML = '<div class="status-item error">Error: ' + message + '</div>';
-                    document.getElementById('akakceStartBtn').disabled = false;
-                    document.getElementById('akakceStartBtn').textContent = 'Start Scraping';
-                    document.getElementById('akakceStopBtn').style.display = 'none';
+                if (currentMode === 'url') {
+                    const body = {
+                        categoryUrl: document.getElementById('categoryUrl').value,
+                        maxProducts: parseInt(document.getElementById('maxProducts').value),
+                        startFrom: parseInt(document.getElementById('startFrom').value),
+                        scanVariants: document.getElementById('scanVariantsUrl').checked,
+                        sessionId: sessionId
+                    };
+                    response = await fetch('/api/akakce/scrape-category', { 
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                } else if (currentMode === 'file') {
+                    const formData = new FormData();
+                    formData.append('file', selectedFileUrl);
+                    formData.append('sessionId', sessionId);
+                    formData.append('scanVariants', document.getElementById('scanVariantsFile').checked);
+                    response = await fetch('/api/akakce/scrape', { method: 'POST', body: formData });
+                } else {
+                    const formData = new FormData();
+                    formData.append('file', selectedFileSearch);
+                    formData.append('sessionId', sessionId);
+                    formData.append('scanVariants', document.getElementById('scanVariantsSearch').checked);
+                    response = await fetch('/api/akakce/search', { method: 'POST', body: formData });
                 }
-            });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const lines = decoder.decode(value).split('\n');
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.progress !== undefined) updateProgress(data.progress);
+                                if (data.message) addLog(data.message, data.type || 'info');
+                                if (data.downloadUrl) {
+                                    const link = document.createElement('a');
+                                    link.href = data.downloadUrl;
+                                    link.className = 'download-link';
+                                    link.innerHTML = '<span>⬇️</span> Download Excel';
+                                    document.getElementById('logBody').appendChild(link);
+                                }
+                            } catch (err) {}
+                        }
+                    }
+                }
+            } catch (err) {
+                addLog('Error: ' + err.message, 'error');
+            }
+
+            isRunning = false;
+            updateStartBtn();
+            document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Scraping';
+            document.getElementById('stopBtn').classList.remove('show');
         });
     </script>
 </body>

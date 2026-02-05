@@ -20,9 +20,8 @@ public class ExcelExporterWithCategories
     {
         try
         {
-            Console.WriteLine($"\n[Excel Export] ========================================");
-            Console.WriteLine($"[Excel Export] Starting category-based export...");
-            Console.WriteLine($"[Excel Export] Total products: {products.Count}");
+
+
 
             // Filter products based on barcode requirement
             var productsToExport = requireBarcode 
@@ -31,7 +30,6 @@ public class ExcelExporterWithCategories
             
             if (requireBarcode && products.Count != productsToExport.Count)
             {
-                Console.WriteLine($"[Excel Export] Skipped {products.Count - productsToExport.Count} products without barcode");
             }
 
             // Group products by leaf category ID
@@ -42,13 +40,10 @@ public class ExcelExporterWithCategories
                     return string.IsNullOrEmpty(leafId) ? "Uncategorized" : leafId;
                 })
                 .ToDictionary(g => g.Key, g => g.ToList());
-
-            Console.WriteLine($"[Excel Export] Found {productsByCategory.Count} unique categories:");
             foreach (var kvp in productsByCategory)
             {
                 var sampleProduct = kvp.Value.First();
                 var categoryNameHierarchy = sampleProduct.CategoryNameHierarchy;
-                Console.WriteLine($"  - {kvp.Key}: {kvp.Value.Count} products ({categoryNameHierarchy})");
             }
 
             using var package = new ExcelPackage();
@@ -68,8 +63,6 @@ public class ExcelExporterWithCategories
                 // Create safe sheet name from the full category name hierarchy
                 var sheetName = CreateSafeSheetName(categoryNameHierarchy, categoryId, sheetIndex);
                 
-                Console.WriteLine($"[Excel Export] Creating sheet: {sheetName} ({categoryProducts.Count} products)");
-                
                 CreateCategorySheet(package, sheetName, categoryProducts, excludePrice, useCdnUrls);
             }
 
@@ -87,16 +80,13 @@ public class ExcelExporterWithCategories
             var file = new FileInfo(filePath);
             package.SaveAs(file);
 
-            Console.WriteLine($"\n[Excel Export] SUCCESS!");
-            Console.WriteLine($"[Excel Export] File saved: {filePath}");
-            Console.WriteLine($"[Excel Export] Total sheets: {package.Workbook.Worksheets.Count}");
-            Console.WriteLine($"[Excel Export] Total products: {productsToExport.Count}");
-            Console.WriteLine($"[Excel Export] ========================================\n");
+
+
+
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"\n[Excel Export] ERROR: {ex.Message}");
-            Console.WriteLine($"[Excel Export] Stack: {ex.StackTrace}");
+
             throw;
         }
     }
@@ -221,8 +211,6 @@ public class ExcelExporterWithCategories
 
         // Freeze header row
         worksheet.View.FreezePanes(2, 1);
-
-        Console.WriteLine($"[Excel Export]   Sheet '{sheetName}': {products.Count} rows, {categoryAttributeKeys.Count} attributes");
     }
 
     /// <summary>

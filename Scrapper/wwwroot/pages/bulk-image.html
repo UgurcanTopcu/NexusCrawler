@@ -1,152 +1,425 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bulk Image Uploader</title>
-    <link rel="stylesheet" href="/css/styles.css">
-</head>
-<body data-theme="green">
-    <div class="container">
-        <h1>&#128444;&#65039; Bulk Image Uploader</h1>
-        <p class="subtitle">Process and upload multiple images to CDN</p>
+    <title>Bulk Image Resizing</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
-        <div class="nav-buttons">
-            <div class="nav-btn" onclick="navigateTo('/')">
-                <h3>&#128722; Category Scraper</h3>
-                <p>Trendyol &amp; Hepsiburada</p>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+            min-height: 100vh;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+
+        .app-container { max-width: 900px; margin: 0 auto; }
+
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+        .header p { color: #94a3b8; font-size: 15px; }
+
+        .nav-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 30px; }
+
+        .nav-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 14px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .nav-item:hover { background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); transform: translateY(-2px); }
+        .nav-item.active { background: rgba(16, 185, 129, 0.2); border-color: #10b981; }
+        .nav-item h3 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .nav-item p { font-size: 11px; color: #94a3b8; }
+
+        .card {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .card-body { padding: 20px; }
+
+        .upload-area {
+            border: 2px dashed rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 50px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        .upload-area:hover { border-color: rgba(16, 185, 129, 0.6); background: rgba(16, 185, 129, 0.1); }
+        .upload-area.has-file { border-color: #10b981; border-style: solid; background: rgba(16, 185, 129, 0.1); }
+        .upload-area.drag-over { border-color: #10b981; background: rgba(16, 185, 129, 0.15); transform: scale(1.02); }
+
+        .upload-icon { font-size: 56px; margin-bottom: 16px; }
+        .upload-area h3 { font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #e2e8f0; }
+        .upload-area p { font-size: 14px; color: #94a3b8; }
+
+        .file-selected { display: none; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; padding: 14px 18px; background: rgba(16, 185, 129, 0.15); border-radius: 10px; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .file-selected.show { display: flex; }
+        .file-selected .file-name { font-size: 14px; font-weight: 500; color: #10b981; }
+
+        .btn-remove { background: rgba(239, 68, 68, 0.2); border: none; color: #ef4444; width: 26px; height: 26px; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+        .btn-remove:hover { background: rgba(239, 68, 68, 0.4); }
+
+        .info-box {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .info-box strong { color: #6ee7b7; font-size: 14px; display: block; margin-bottom: 10px; }
+        .info-box ul { margin: 0 0 0 20px; font-size: 13px; color: #94a3b8; }
+        .info-box li { margin-bottom: 6px; }
+
+        .action-buttons { display: flex; gap: 10px; margin-top: 20px; }
+
+        .btn {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+        .btn-primary:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4); }
+        .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; display: none; }
+        .btn-danger.show { display: flex; }
+        .btn-secondary { background: rgba(255, 255, 255, 0.1); color: #e2e8f0; border: 1px solid rgba(255, 255, 255, 0.2); }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+
+        .progress-card { display: none; }
+        .progress-card.show { display: block; }
+
+        .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .progress-header span { font-size: 14px; color: #94a3b8; }
+        .progress-header .percent { font-size: 20px; font-weight: 700; color: #10b981; }
+
+        .progress-track { height: 10px; background: rgba(16, 185, 129, 0.2); border-radius: 10px; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #10b981, #059669); border-radius: 10px; width: 0%; transition: width 0.3s ease; }
+
+        .log-body { max-height: 300px; overflow-y: auto; padding: 0; }
+        .log-body::-webkit-scrollbar { width: 6px; }
+        .log-body::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
+        .log-body::-webkit-scrollbar-thumb { background: rgba(16, 185, 129, 0.3); border-radius: 3px; }
+
+        .log-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; color: #64748b; }
+        .log-empty span { font-size: 36px; margin-bottom: 10px; opacity: 0.5; }
+
+        .log-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+        .log-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+        .log-item.success .log-icon { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .log-item.error .log-icon { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .log-item.warning .log-icon { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .log-item.info .log-icon { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+
+        .log-content { flex: 1; min-width: 0; }
+        .log-message { font-size: 13px; line-height: 1.5; word-break: break-word; }
+
+        .log-item.success .log-message { color: #10b981; }
+        .log-item.error .log-message { color: #f87171; }
+        .log-item.warning .log-message { color: #fbbf24; }
+        .log-item.info .log-message { color: #e2e8f0; }
+
+        .log-time { font-size: 11px; color: #64748b; flex-shrink: 0; }
+
+        .btn-clear { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+        .btn-clear:hover { background: rgba(239, 68, 68, 0.2); }
+
+        .download-link { display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 12px 24px; border-radius: 10px; text-decoration: none; font-weight: 600; margin: 16px 20px; }
+        .download-link:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4); }
+
+
+        .footer { text-align: center; margin-top: 30px; }
+        .footer a { color: #10b981; text-decoration: none; font-size: 14px; }
+        .footer a:hover { color: #6ee7b7; }
+
+        @media (max-width: 768px) {
+            .nav-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <h1>🖼️ Bulk Image Resizing</h1>
+            <p>Process and resize multiple images for CDN upload</p>
+        </div>
+
+        <div class="nav-grid">
+            <div class="nav-item" onclick="location.href='/'">
+                <h3>🛒 Category Scraper</h3>
+                <p>Trendyol & Hepsiburada</p>
             </div>
-            <div class="nav-btn" onclick="navigateTo('/akakce')">
-                <h3>&#128176; Akakce Scraper</h3>
+            <div class="nav-item" onclick="location.href='/akakce'">
+                <h3>💰 Akakce Lead Gen</h3>
                 <p>Price Comparison</p>
             </div>
-            <div class="nav-btn" onclick="navigateTo('/akakce-search')">
-                <h3>&#128269; Akakce Search</h3>
-                <p>Search by Name</p>
+            <div class="nav-item" onclick="location.href='/hepsiburada-barcode'">
+                <h3>📊 Mirakl Catalogue</h3>
+                <p>Catalogue Analysis</p>
             </div>
-            <div class="nav-btn active">
-                <h3>&#128444;&#65039; Bulk Image Uploader</h3>
-                <p>Process &amp; Upload Images</p>
+            <div class="nav-item active">
+                <h3>🖼️ Image Resizing</h3>
+                <p>Bulk Processing</p>
             </div>
         </div>
-        
-        <form id="bulkImageForm">
-            <div class="form-group">
-                <label>Upload Excel File with Image URLs</label>
-                <div class="file-upload" id="dropZone">
-                    <input type="file" id="excelFile" accept=".xlsx,.xls">
-                    <div class="icon">&#128193;</div>
-                    <div class="text">
-                        <strong>Click to upload</strong> or drag and drop<br>
-                        Excel file (.xlsx, .xls)
+
+        <div class="card">
+            <div class="card-header">
+                <h2>📁 Upload Excel with Image URLs</h2>
+            </div>
+            <div class="card-body">
+                <form id="uploadForm">
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-icon">📂</div>
+                        <h3 id="uploadText">Drop Excel file here or click to browse</h3>
+                        <p id="uploadHint">Supports .xlsx and .xls files with image URLs</p>
+                        <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
                     </div>
-                    <div class="filename" id="fileName"></div>
+                    <div class="file-selected" id="fileSelected">
+                        <span>📄</span>
+                        <span class="file-name" id="fileName"></span>
+                        <button type="button" class="btn-remove" onclick="removeFile(event)">✕</button>
+                    </div>
+
+                    <div class="info-box">
+                        <strong>📊 Excel File Format:</strong>
+                        <ul>
+                            <li>Supports MULTIPLE columns with image URLs</li>
+                            <li>Automatically detects image URLs in ANY column</li>
+                            <li>Non-image columns are preserved EXACTLY as they are</li>
+                            <li>Supports jpg, jpeg, png, gif, webp formats</li>
+                        </ul>
+                    </div>
+
+                    <div class="info-box">
+                        <strong>⚙️ Processing Steps:</strong>
+                        <ul>
+                            <li>Downloads images from identified URL columns</li>
+                            <li>Adds watermark and resizes to 1000x1000px</li>
+                            <li>Uploads processed images to FTP/CDN</li>
+                            <li>Replaces image URLs with CDN URLs</li>
+                            <li>Generates Excel with updated URLs</li>
+                        </ul>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button type="submit" class="btn btn-primary" id="startBtn" disabled>
+                            <span>🚀</span> Start Processing
+                        </button>
+                        <button type="button" class="btn btn-danger" id="stopBtn" onclick="handleStop()">
+                            <span>⛔</span> Stop
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="handleReset()">
+                            <span>🔄</span> Reset
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card progress-card" id="progressCard">
+            <div class="card-body">
+                <div class="progress-header">
+                    <span>Progress</span>
+                    <span class="percent" id="progressPercent">0%</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-bar" id="progressBar"></div>
                 </div>
             </div>
-            
-            <div class="info-box">
-                <strong>Excel File Format:</strong>
-                <ul>
-                    <li>Supports MULTIPLE columns with image URLs</li>
-                    <li>Automatically detects image URLs in ANY column</li>
-                    <li>Non-image columns are preserved EXACTLY as they are</li>
-                    <li>Supports jpg, jpeg, png, gif, webp formats</li>
-                    <li>Images will be downloaded, resized to 1000x1000, and uploaded to CDN</li>
-                    <li>Example: Column A = Product Name, Column B = Image 1, Column C = Price, Column D = Image 2</li>
-                </ul>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>📋 Activity Log</h2>
+                <button class="btn-clear" onclick="clearLog()">Clear</button>
             </div>
-            
-            <div class="info-box">
-                <strong>Processing Steps:</strong>
-                <ul>
-                    <li>Scans ALL columns and identifies image URLs automatically</li>
-                    <li>Downloads images from identified URL columns</li>
-                    <li>Adds watermark and resizes to 1000x1000px</li>
-                    <li>Uploads processed images to FTP/CDN</li>
-                    <li>Replaces image URLs with CDN URLs (green highlight)</li>
-                    <li>Preserves all other columns without any changes (white background)</li>
-                    <li>Generates summary report showing which columns were processed</li>
-                </ul>
+            <div class="log-body" id="logBody">
+                <div class="log-empty" id="logEmpty">
+                    <span>📋</span>
+                    <p>Upload a file to start processing</p>
+                </div>
             </div>
-            
-            <div class="button-group">
-                <button type="submit" id="uploadBtn" class="btn-primary" disabled>Start Processing</button>
-                <button type="button" id="stopBtn" class="btn-stop" onclick="handleStop()">Stop</button>
-                <button type="button" id="resetBtn" class="btn-reset" onclick="handleReset()">Reset</button>
-            </div>
-        </form>
-        
-        <div id="progress">
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill">0%</div>
-            </div>
-            <div id="status"></div>
+        </div>
+
+        <div class="footer">
+            <a href="/">← Back to Home</a>
         </div>
     </div>
-    
-    <script src="/js/scraper-common.js"></script>
+
     <script>
+        let isRunning = false;
+        let sessionId = null;
         let selectedFile = null;
-        
-        // Setup file upload
-        setupFileUpload('dropZone', 'excelFile', 'fileName', (file) => {
-            selectedFile = file;
-            document.getElementById('uploadBtn').disabled = false;
-        });
-        
-        function handleReset() {
-            if (getIsRunning()) handleStop();
-            selectedFile = null;
-            document.getElementById('excelFile').value = '';
-            document.getElementById('fileName').textContent = '';
-            document.getElementById('uploadBtn').disabled = true;
-            document.getElementById('uploadBtn').textContent = 'Start Processing';
-            document.getElementById('stopBtn').style.display = 'none';
-            resetProgressUI();
-        }
-        
-        async function handleStop() {
-            await stopOperation('/api/bulk-image/stop/');
-            document.getElementById('uploadBtn').disabled = false;
-            document.getElementById('uploadBtn').textContent = 'Start Processing';
-            document.getElementById('stopBtn').style.display = 'none';
-            addStatusMessage('Processing stopped. Check for partial results below.', 'warning');
-        }
-        
-        document.getElementById('bulkImageForm').addEventListener('submit', async (e) => {
+
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileSelected = document.getElementById('fileSelected');
+        const fileName = document.getElementById('fileName');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
+        uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
-            
+            uploadArea.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; handleFile(); }
+        });
+        fileInput.addEventListener('change', handleFile);
+
+        function handleFile() {
+            const file = fileInput.files[0];
+            if (file) {
+                selectedFile = file;
+                fileName.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                fileSelected.classList.add('show');
+                document.getElementById('uploadText').style.display = 'none';
+                document.getElementById('uploadHint').style.display = 'none';
+                uploadArea.classList.add('has-file');
+                document.getElementById('startBtn').disabled = false;
+            }
+        }
+
+        function removeFile(e) {
+            if (e) e.stopPropagation();
+            selectedFile = null;
+            fileInput.value = '';
+            fileSelected.classList.remove('show');
+            document.getElementById('uploadText').style.display = 'block';
+            document.getElementById('uploadHint').style.display = 'block';
+            uploadArea.classList.remove('has-file');
+            document.getElementById('startBtn').disabled = true;
+        }
+
+        function addLog(message, type = 'info') {
+            const logBody = document.getElementById('logBody');
+            const logEmpty = document.getElementById('logEmpty');
+            if (logEmpty) logEmpty.style.display = 'none';
+            const iconMap = { success: '✓', error: '✗', warning: '!', info: 'ℹ' };
+            const item = document.createElement('div');
+            item.className = `log-item ${type}`;
+            item.innerHTML = `<div class="log-icon">${iconMap[type] || '?'}</div><div class="log-content"><div class="log-message">${message}</div></div><div class="log-time">${new Date().toLocaleTimeString()}</div>`;
+            logBody.appendChild(item);
+            logBody.scrollTop = logBody.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('logBody').innerHTML = '<div class="log-empty" id="logEmpty"><span>📋</span><p>Log cleared</p></div>';
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressPercent').textContent = percent + '%';
+        }
+
+        function handleReset() {
+            if (isRunning) handleStop();
+            removeFile();
+            document.getElementById('progressCard').classList.remove('show');
+            document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Processing';
+            document.getElementById('stopBtn').classList.remove('show');
+            updateProgress(0);
+            clearLog();
+        }
+
+        async function handleStop() {
+            if (sessionId) await fetch('/api/bulk-image/stop/' + sessionId, { method: 'POST' });
+            isRunning = false;
+            document.getElementById('startBtn').disabled = !selectedFile;
+            document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Processing';
+            document.getElementById('stopBtn').classList.remove('show');
+            addLog('Processing stopped by user', 'warning');
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
             if (!selectedFile) return;
             
-            document.getElementById('uploadBtn').disabled = true;
-            document.getElementById('uploadBtn').textContent = 'Processing...';
-            document.getElementById('stopBtn').style.display = 'block';
-            showProgress(true);
-            document.getElementById('status').innerHTML = '<div class="status-item">Starting image processing...</div>';
+            isRunning = true;
+            sessionId = 'session_' + Date.now();
             
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('startBtn').innerHTML = '<span>?</span> Processing...';
+            document.getElementById('stopBtn').classList.add('show');
+            document.getElementById('progressCard').classList.add('show');
+            clearLog();
+            addLog('Starting image processing...', 'info');
+
             const formData = new FormData();
             formData.append('file', selectedFile);
-            formData.append('sessionId', getSessionId() || Date.now().toString());
-            
-            await startSseStream('/api/bulk-image/process', {
-                method: 'POST',
-                body: formData
-            }, {
-                onProgress: updateProgressBar,
-                onMessage: addStatusMessage,
-                onDownload: addDownloadLink,
-                onComplete: () => {
-                    document.getElementById('uploadBtn').disabled = false;
-                    document.getElementById('uploadBtn').textContent = 'Start Processing';
-                    document.getElementById('stopBtn').style.display = 'none';
-                },
-                onError: (message) => {
-                    document.getElementById('status').innerHTML = '<div class="status-item error">Error: ' + message + '</div>';
-                    document.getElementById('uploadBtn').disabled = false;
-                    document.getElementById('uploadBtn').textContent = 'Start Processing';
-                    document.getElementById('stopBtn').style.display = 'none';
+            formData.append('sessionId', sessionId);
+
+            try {
+                const response = await fetch('/api/bulk-image/process', { method: 'POST', body: formData });
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const lines = decoder.decode(value).split('\n');
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.progress !== undefined) updateProgress(data.progress);
+                                if (data.message) addLog(data.message, data.type || 'info');
+                                if (data.downloadUrl) {
+                                    const link = document.createElement('a');
+                                    link.href = data.downloadUrl;
+                                    link.className = 'download-link';
+                                link.innerHTML = '<span>⬇️</span> Download Excel';
+                                    document.getElementById('logBody').appendChild(link);
+                                }
+                            } catch (err) {}
+                        }
+                    }
                 }
-            });
+            } catch (err) {
+                addLog('Error: ' + err.message, 'error');
+            }
+
+            isRunning = false;
+            document.getElementById('startBtn').disabled = !selectedFile;
+            document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Processing';
+            document.getElementById('stopBtn').classList.remove('show');
         });
     </script>
 </body>

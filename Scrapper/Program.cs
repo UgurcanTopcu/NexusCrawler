@@ -5,18 +5,10 @@ using Scrapper.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ============================================
-// SERVICE REGISTRATION (no duplicates)
-// ============================================
-
-// Configuration
 builder.Services.AddSingleton<CdnFtpConfig>();
-
-// HTTP Client
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<HttpClient>();
 
-// Core Services
 builder.Services.AddSingleton<CdnCacheService>();
 builder.Services.AddSingleton<FtpUploadService>();
 builder.Services.AddSingleton<ImageProcessingService>(sp =>
@@ -27,48 +19,23 @@ builder.Services.AddSingleton<ImageProcessingService>(sp =>
     return new ImageProcessingService(httpClient, ftpService, cdnCache);
 });
 
-// Scraper Services
 builder.Services.AddSingleton<TrendyolScraperService>();
 builder.Services.AddSingleton<HepsiburadaScraperService>();
 builder.Services.AddSingleton<AkakceScraperService>();
 builder.Services.AddSingleton<AkakceSearchService>();
 builder.Services.AddSingleton<HepsiburadaBarcodeSearchService>();
 
-// Bulk Image Services
 builder.Services.AddSingleton<BulkImageExcelReader>();
 builder.Services.AddSingleton<BulkImageProcessingService>();
 builder.Services.AddSingleton<BulkImageExcelExporter>();
 
-// MVC
 builder.Services.AddControllersWithViews();
 
-// ============================================
-// EPPLUS LICENSE
-// ============================================
-try
-{
-    ExcelPackage.License.SetNonCommercialOrganization("Personal");
-    Console.WriteLine("[EPPlus] License set to NonCommercial");
-}
-catch (Exception ex)
-{
-    Console.WriteLine($"[EPPlus] License setup failed: {ex.Message}");
-    try
-    {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-        Console.WriteLine("[EPPlus] License context set using legacy method");
-    }
-    catch (Exception ex2)
-    {
-        Console.WriteLine($"[EPPlus] Legacy license failed too: {ex2.Message}");
-    }
-}
+
+ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
 
 var app = builder.Build();
 
-// ============================================
-// MIDDLEWARE PIPELINE
-// ============================================
 
 if (!app.Environment.IsDevelopment())
 {

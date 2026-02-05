@@ -9,7 +9,7 @@ public class AkakceExcelReader
 {
     static AkakceExcelReader()
     {
-        ExcelPackage.License.SetNonCommercialPersonal("Your Name");
+        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
     }
 
     /// <summary>
@@ -26,7 +26,6 @@ public class AkakceExcelReader
 
         try
         {
-            Console.WriteLine($"[Excel Reader] Opening file: {filePath}");
             
             var fileInfo = new FileInfo(filePath);
             if (!fileInfo.Exists)
@@ -43,20 +42,15 @@ public class AkakceExcelReader
                 throw new Exception("No worksheets found in the Excel file");
             }
 
-            Console.WriteLine($"[Excel Reader] Reading worksheet: {worksheet.Name}");
-
             // Determine the range
             var dimension = worksheet.Dimension;
             if (dimension == null)
             {
-                Console.WriteLine("[Excel Reader] Worksheet is empty");
                 return urls;
             }
 
             int startRow = hasHeader ? 2 : 1;
             int endRow = dimension.End.Row;
-
-            Console.WriteLine($"[Excel Reader] Processing rows {startRow} to {endRow}");
 
             for (int row = startRow; row <= endRow; row++)
             {
@@ -73,27 +67,21 @@ public class AkakceExcelReader
                 else
                 {
                     invalidUrls.Add(cellValue);
-                    Console.WriteLine($"[Excel Reader] Row {row}: Invalid URL - {cellValue.Substring(0, Math.Min(50, cellValue.Length))}...");
                 }
             }
 
-            Console.WriteLine($"\n[Excel Reader] ========== SUMMARY ==========");
-            Console.WriteLine($"[Excel Reader] Valid URLs found: {urls.Count}");
-            Console.WriteLine($"[Excel Reader] Invalid URLs skipped: {invalidUrls.Count}");
-            Console.WriteLine($"[Excel Reader] ==============================\n");
+
+
 
             if (invalidUrls.Count > 0 && invalidUrls.Count <= 5)
             {
-                Console.WriteLine("[Excel Reader] Invalid URLs:");
                 foreach (var url in invalidUrls)
                 {
-                    Console.WriteLine($"  - {url}");
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Excel Reader] Error reading file: {ex.Message}");
             throw;
         }
 
@@ -118,19 +106,14 @@ public class AkakceExcelReader
                 throw new Exception("No worksheets found in the Excel file");
             }
 
-            Console.WriteLine($"[Excel Reader] Reading worksheet from stream: {worksheet.Name}");
-
             var dimension = worksheet.Dimension;
             if (dimension == null)
             {
-                Console.WriteLine("[Excel Reader] Worksheet is empty");
                 return urls;
             }
 
             int startRow = hasHeader ? 2 : 1;
             int endRow = dimension.End.Row;
-
-            Console.WriteLine($"[Excel Reader] Processing rows {startRow} to {endRow}");
 
             for (int row = startRow; row <= endRow; row++)
             {
@@ -148,12 +131,9 @@ public class AkakceExcelReader
                     invalidUrls.Add(cellValue);
                 }
             }
-
-            Console.WriteLine($"[Excel Reader] Valid: {urls.Count}, Invalid: {invalidUrls.Count}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Excel Reader] Error reading stream: {ex.Message}");
             throw;
         }
 
@@ -187,7 +167,6 @@ public class AkakceExcelReader
                 if (!string.IsNullOrWhiteSpace(cellValue) && 
                     AkakceScraper.IsValidAkakceUrl(cellValue))
                 {
-                    Console.WriteLine($"[Excel Reader] Auto-detected URL column: {col}");
                     return col;
                 }
             }
@@ -200,7 +179,6 @@ public class AkakceExcelReader
                     var header = worksheet.Cells[1, col].Value?.ToString()?.Trim()?.ToLower();
                     if (header != null && (header.Contains("url") || header.Contains("link") || header.Contains("adres")))
                     {
-                        Console.WriteLine($"[Excel Reader] Detected URL column from header: {col}");
                         return col;
                     }
                 }
@@ -208,7 +186,6 @@ public class AkakceExcelReader
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Excel Reader] Error detecting column: {ex.Message}");
         }
 
         return 1; // Default to first column

@@ -1,4 +1,4 @@
-﻿using HtmlAgilityPack;
+using HtmlAgilityPack;
 using Scrapper.Models;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -63,14 +63,12 @@ public class TrendyolScraper : IDisposable
             
             // Remove pi parameter if it exists in the original URL
             existingParams.Remove("pi");
-            
-            Console.WriteLine("\n[Trendyol] Starting product discovery...");
-            Console.WriteLine($"[Trendyol] Target: {maxProducts} products");
+
             Console.Out.Flush();
             
             if (onProgress != null)
             {
-                await onProgress(5, $"🔍 Finding products (target: {maxProducts})...", "info");
+                await onProgress(5, $"?? Finding products (target: {maxProducts})...", "info");
             }
             
             int page = 1;
@@ -97,8 +95,6 @@ public class TrendyolScraper : IDisposable
                     }
                     paginatedUrl = pageParams.Count > 0 ? $"{basePath}?{pageParams}" : basePath;
                 }
-                
-                Console.WriteLine($"[Trendyol] Page {page}...");
                 Console.Out.Flush();
                 
                 _driver!.Navigate().GoToUrl(paginatedUrl);
@@ -114,7 +110,6 @@ public class TrendyolScraper : IDisposable
                     emptyPageCount++;
                     if (emptyPageCount >= 2)
                     {
-                        Console.WriteLine($"[Trendyol] No more products available");
                         Console.Out.Flush();
                         break;
                     }
@@ -160,7 +155,6 @@ public class TrendyolScraper : IDisposable
                 
                 if (adLinks.Count > 0)
                 {
-                    Console.WriteLine($"[Trendyol] Excluding {adLinks.Count} ad products from widget-container");
                 }
                 
                 foreach (var element in linkElements)
@@ -198,7 +192,7 @@ public class TrendyolScraper : IDisposable
                                 if (onProgress != null && (productLinks.Count % 5 == 0 || productLinks.Count == maxProducts))
                                 {
                                     var progressPercent = Math.Min(5 + (int)((productLinks.Count / (double)maxProducts) * 5), 10);
-                                    await onProgress(progressPercent, $"📦 Found {productLinks.Count}/{maxProducts} products", "info");
+                                    await onProgress(progressPercent, $"?? Found {productLinks.Count}/{maxProducts} products", "info");
                                 }
                             }
                         }
@@ -212,11 +206,10 @@ public class TrendyolScraper : IDisposable
                 // Check if we reached the target
                 if (productLinks.Count >= maxProducts)
                 {
-                    Console.WriteLine($"[Trendyol] ✓ Target reached!");
                     Console.Out.Flush();
                     if (onProgress != null)
                     {
-                        await onProgress(10, $"✅ Found all {productLinks.Count} product URLs!", "success");
+                        await onProgress(10, $"? Found all {productLinks.Count} product URLs!", "success");
                     }
                     break;
                 }
@@ -227,11 +220,10 @@ public class TrendyolScraper : IDisposable
                     emptyPageCount++;
                     if (emptyPageCount >= 2)
                     {
-                        Console.WriteLine($"[Trendyol] ✓ End of available products");
                         Console.Out.Flush();
                         if (onProgress != null && productLinks.Count > 0)
                         {
-                            await onProgress(10, $"✅ Found {productLinks.Count} products (all available)", "success");
+                            await onProgress(10, $"? Found {productLinks.Count} products (all available)", "success");
                         }
                         break;
                     }
@@ -247,16 +239,13 @@ public class TrendyolScraper : IDisposable
                 // Small delay between page loads
                 await Task.Delay(300);
             }
-            
-            Console.WriteLine($"\n[Trendyol] ✓ Total: {productLinks.Count} products from {page - 1} pages\n");
             Console.Out.Flush();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error fetching product links: {ex.Message}");
             if (onProgress != null)
             {
-                await onProgress(10, $"❌ Error finding products: {ex.Message}", "error");
+                await onProgress(10, $"? Error finding products: {ex.Message}", "error");
             }
         }
 
@@ -503,7 +492,6 @@ public class TrendyolScraper : IDisposable
                         if (imageUrls != null && !string.IsNullOrWhiteSpace(imageUrls.ToString()))
                         {
                             var urls = imageUrls.ToString()!.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
-                            Console.WriteLine($"[Trendyol] Raw image URLs found: {urls.Length}");
                             
                             foreach (var url in urls)
                             {
@@ -520,7 +508,6 @@ public class TrendyolScraper : IDisposable
                                 if (imgUrl.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) ||
                                     imgUrl.Contains(".svg", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    Console.WriteLine($"[Trendyol] SKIPPED SVG: {imgUrl}");
                                     continue;
                                 }
                                 
@@ -533,45 +520,38 @@ public class TrendyolScraper : IDisposable
                                     imgUrl.Contains("/banner", StringComparison.OrdinalIgnoreCase) ||
                                     imgUrl.Contains("static/", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    Console.WriteLine($"[Trendyol] SKIPPED non-product: {imgUrl.Substring(0, Math.Min(60, imgUrl.Length))}...");
                                     continue;
                                 }
                                 
                                 // Skip placeholder images
                                 if (imgUrl.Contains("placeholder", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    Console.WriteLine($"[Trendyol] SKIPPED placeholder: {imgUrl}");
                                     continue;
                                 }
                                 
                                 if (!allImages.Contains(imgUrl))
                                 {
                                     allImages.Add(imgUrl);
-                                    Console.WriteLine($"[Trendyol] ✓ Added image {allImages.Count}: {imgUrl.Substring(0, Math.Min(80, imgUrl.Length))}...");
                                 }
                             }
                         }
                         else
                         {
-                            Console.WriteLine("[Trendyol] ⚠ JavaScript returned no images!");
                         }
                     }
                     catch (Exception imgEx)
                     {
-                        Console.WriteLine($"[Trendyol] Image extraction error: {imgEx.Message}");
                     }
                 }
                 
                 // Fallback: Parse HTML directly if Selenium didn't find images
                 if (allImages.Count == 0)
                 {
-                    Console.WriteLine("[Trendyol] Falling back to HTML parsing for images...");
                     
                     // Look for product images with _org pattern in src
                     var imgNodes = htmlDoc.DocumentNode.SelectNodes("//img[contains(@src, 'cdn.dsmcdn.com') and (contains(@src, '_org') or contains(@src, 'mnresize'))]");
                     if (imgNodes != null)
                     {
-                        Console.WriteLine($"[Trendyol] HTML fallback found {imgNodes.Count} img nodes");
                         
                         foreach (var node in imgNodes)
                         {
@@ -604,37 +584,30 @@ public class TrendyolScraper : IDisposable
                             if (!allImages.Contains(imgUrl))
                             {
                                 allImages.Add(imgUrl);
-                                Console.WriteLine($"[Trendyol] HTML fallback - Added image {allImages.Count}");
                             }
                         }
                     }
                     else
                     {
-                        Console.WriteLine("[Trendyol] ⚠ HTML parsing found no product img nodes!");
                     }
                 }
                 
                 if (allImages.Count > 0)
                 {
                     product.ImageUrl = allImages[0];
-                    Console.WriteLine($"[Trendyol] ✓ Set main image: {product.ImageUrl}");
                     
                     for (int i = 1; i < allImages.Count; i++)
                     {
                         product.AdditionalImages.Add(allImages[i]);
                     }
-                    
-                    Console.WriteLine($"[Trendyol] ✓ Total images: {allImages.Count} (1 main + {product.AdditionalImages.Count} additional)");
                 }
                 else
                 {
-                    Console.WriteLine("[Trendyol] ⚠ WARNING: No product images found!");
-                    Console.WriteLine($"[Trendyol] Product URL: {productUrl}");
+
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Trendyol] Image extraction failed: {ex.Message}");
             }
 
             // EXTRACT CATEGORY
@@ -670,7 +643,7 @@ public class TrendyolScraper : IDisposable
                         // Try to click the description tab
                         try
                         {
-                            var descriptionTab = _driver.FindElement(By.XPath("//a[contains(text(), 'ÜRÜN BİLGİLERİ')]"));
+                            var descriptionTab = _driver.FindElement(By.XPath("//a[contains(text(), '�R�N B�LG�LER�')]"));
                             descriptionTab.Click();
                             await Task.Delay(500);
                         }
@@ -750,7 +723,6 @@ public class TrendyolScraper : IDisposable
                             if (jsonMatch.Success)
                             {
                                 product.Barcode = jsonMatch.Groups[1].Value;
-                                Console.WriteLine($"[Trendyol] Barcode found: {product.Barcode}");
                                 break;
                             }
                         }
@@ -772,7 +744,6 @@ public class TrendyolScraper : IDisposable
                             if (!string.IsNullOrEmpty(content) && Regex.IsMatch(content, @"^\d{8,}$"))
                             {
                                 product.Barcode = content;
-                                Console.WriteLine($"[Trendyol] Barcode found in meta: {product.Barcode}");
                                 break;
                             }
                         }
@@ -791,7 +762,6 @@ public class TrendyolScraper : IDisposable
                             if (barcodeValue.Success)
                             {
                                 product.Barcode = barcodeValue.Value;
-                                Console.WriteLine($"[Trendyol] Barcode found in attributes: {product.Barcode}");
                                 break;
                             }
                         }
@@ -806,13 +776,11 @@ public class TrendyolScraper : IDisposable
                     if (htmlMatch.Success)
                     {
                         product.Barcode = htmlMatch.Groups[1].Value;
-                        Console.WriteLine($"[Trendyol] Barcode found in HTML (scrape.do): {product.Barcode}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Trendyol] Barcode extraction error: {ex.Message}");
             }
 
             // EXTRACT PRODUCT ATTRIBUTES
@@ -821,14 +789,12 @@ public class TrendyolScraper : IDisposable
             // Log successful extraction summary
             if (Method == ScrapeMethod.ScrapeDo)
             {
-                Console.WriteLine($"[Trendyol-ScrapeDo] Product: {product.Name ?? "N/A"} | Barcode: {product.Barcode ?? "NOT FOUND"} | Price: {product.DiscountedPrice ?? "N/A"}");
             }
 
             return product;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error scraping product: {ex.Message}");
         }
 
         return null;
@@ -913,7 +879,7 @@ public class TrendyolScraper : IDisposable
         if (match.Success)
         {
             var numericValue = match.Value;
-            if (priceText.Contains("TL") || priceText.Contains("₺"))
+            if (priceText.Contains("TL") || priceText.Contains("?"))
                 return numericValue + " TL";
             return numericValue + " TL";
         }
@@ -928,7 +894,6 @@ public class TrendyolScraper : IDisposable
         var productLinks = await GetProductLinksAsync(categoryUrl);
         
         var linksToProcess = productLinks.Take(maxProducts).ToList();
-        Console.WriteLine($"\nProcessing {linksToProcess.Count} products...\n");
 
         foreach (var link in linksToProcess)
         {

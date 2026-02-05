@@ -14,14 +14,12 @@ public class TemplateExcelExporter
         try
         {
             // EPPlus license already set in Program.cs
-            Console.WriteLine($"\n[Template Export] Using template: {template.Name}");
-            Console.WriteLine($"[Template Export] Columns: {template.Columns.Count}");
-            Console.WriteLine($"[Template Export] Products: {products.Count}");
+
+
             
             // Analyze which attributes are missing from the template
             if (products.Count > 0)
             {
-                Console.WriteLine($"\n[Template Export] Analyzing attribute coverage...");
                 var allScrapedAttributes = new HashSet<string>();
                 foreach (var product in products)
                 {
@@ -46,20 +44,16 @@ public class TemplateExcelExporter
                 
                 if (unmappedAttributes.Any())
                 {
-                    Console.WriteLine($"\n??  WARNING: {unmappedAttributes.Count} scraped attributes are NOT mapped in the template:");
                     foreach (var attr in unmappedAttributes)
                     {
                         // Show example value from first product
                         var exampleProduct = products.FirstOrDefault(p => p.Attributes.ContainsKey(attr));
                         var exampleValue = exampleProduct?.Attributes[attr] ?? "";
                         if (exampleValue.Length > 50) exampleValue = exampleValue.Substring(0, 50) + "...";
-                        Console.WriteLine($"   ? '{attr}' (example: '{exampleValue}')");
                     }
-                    Console.WriteLine($"\n?? TIP: Add these attributes to your template to avoid data loss!\n");
                 }
                 else
                 {
-                    Console.WriteLine($"? All scraped attributes are mapped in the template!");
                 }
             }
 
@@ -116,14 +110,11 @@ public class TemplateExcelExporter
             var file = new FileInfo(filePath);
             package.SaveAs(file);
 
-            Console.WriteLine($"\n? [Template Export] File saved: {filePath}");
-            Console.WriteLine($"   Products exported: {products.Count}");
-            Console.WriteLine($"   Template: {template.Name}");
+
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"\n? [Template Export] Error: {ex.Message}");
-            Console.WriteLine($"   Stack trace: {ex.StackTrace}");
+
             throw;
         }
     }
@@ -182,12 +173,10 @@ public class TemplateExcelExporter
                 var mainImageUrl = useCdnUrls && !string.IsNullOrEmpty(product.CdnImageUrl)
                     ? product.CdnImageUrl
                     : product.ImageUrl ?? "";
-                    
-                Console.WriteLine($"[Template] Main Image for '{product.Name}':");
-                Console.WriteLine($"   useCdnUrls: {useCdnUrls}");
-                Console.WriteLine($"   CdnImageUrl: {(string.IsNullOrEmpty(product.CdnImageUrl) ? "NULL" : product.CdnImageUrl)}");
-                Console.WriteLine($"   ImageUrl (fallback): {(string.IsNullOrEmpty(product.ImageUrl) ? "NULL" : product.ImageUrl)}");
-                Console.WriteLine($"   Final value: {(string.IsNullOrEmpty(mainImageUrl) ? "EMPTY" : mainImageUrl)}");
+
+
+
+
                 return mainImageUrl;
 
             // Additional images
@@ -258,7 +247,6 @@ public class TemplateExcelExporter
             if (product.CdnAdditionalImages.Count > index)
             {
                 imageUrl = product.CdnAdditionalImages[index];
-                Console.WriteLine($"[Template] Additional Image {index + 1} for '{product.Name}': CDN URL = {imageUrl}");
                 return imageUrl;
             }
             
@@ -266,11 +254,8 @@ public class TemplateExcelExporter
             if (product.AdditionalImages.Count > index)
             {
                 imageUrl = product.AdditionalImages[index];
-                Console.WriteLine($"[Template] Additional Image {index + 1} for '{product.Name}': CDN fallback to original = {imageUrl}");
                 return imageUrl;
             }
-            
-            Console.WriteLine($"[Template] Additional Image {index + 1} for '{product.Name}': NOT FOUND (CDN={product.CdnAdditionalImages.Count}, Original={product.AdditionalImages.Count})");
         }
         else
         {
@@ -278,11 +263,8 @@ public class TemplateExcelExporter
             if (product.AdditionalImages.Count > index)
             {
                 imageUrl = product.AdditionalImages[index];
-                Console.WriteLine($"[Template] Additional Image {index + 1} for '{product.Name}': Original URL = {imageUrl}");
                 return imageUrl;
             }
-            
-            Console.WriteLine($"[Template] Additional Image {index + 1} for '{product.Name}': NOT FOUND (Original={product.AdditionalImages.Count} total)");
         }
 
         return "";

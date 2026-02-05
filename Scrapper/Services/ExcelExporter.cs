@@ -19,7 +19,6 @@ public class ExcelExporter
                 var skippedCount = products.Count - productsToExport.Count;
                 if (skippedCount > 0)
                 {
-                    Console.WriteLine($"[Excel] Skipping {skippedCount} products without barcode (requireBarcode=true)");
                 }
             }
             
@@ -161,39 +160,29 @@ public class ExcelExporter
             var file = new FileInfo(filePath);
             package.SaveAs(file);
 
-            Console.WriteLine($"\n? Excel file saved successfully: {filePath}");
-            Console.WriteLine($"? Total products exported: {productsToExport.Count}");
             if (requireBarcode && products.Count != productsToExport.Count)
             {
-                Console.WriteLine($"  Skipped (no barcode): {products.Count - productsToExport.Count}");
             }
-            Console.WriteLine($"? Product features found: {allAttributeKeys.Count}");
             if (!excludePrice)
             {
-                Console.WriteLine($"  Price column: Included");
             }
             else
             {
-                Console.WriteLine($"  Price column: Excluded");
             }
             if (useCdnUrls)
             {
                 var cdnCount = productsToExport.Count(p => p.HasCdnImages());
-                Console.WriteLine($"  Image URLs: CDN ({cdnCount}/{productsToExport.Count} products with CDN images)");
             }
             else
             {
-                Console.WriteLine($"  Image URLs: Original (from source)");
             }
             if (allAttributeKeys.Count > 0)
             {
-                Console.WriteLine($"  Features: {string.Join(", ", allAttributeKeys)}");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"\n? Error saving Excel file: {ex.Message}");
-            Console.WriteLine($"  Stack trace: {ex.StackTrace}");
+
             throw;
         }
     }
