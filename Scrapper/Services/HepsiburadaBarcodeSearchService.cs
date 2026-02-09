@@ -12,6 +12,7 @@ public class HepsiburadaBarcodeSearchService
     private readonly HttpClient _httpClient;
     private readonly ScrapeDoConfig _config;
     private const int MaxParallelRequests = 5;
+    private const int DelayBetweenRequestsMs = 1000;
 
     static HepsiburadaBarcodeSearchService()
     {
@@ -20,7 +21,7 @@ public class HepsiburadaBarcodeSearchService
 
     public HepsiburadaBarcodeSearchService()
     {
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
         _config = new ScrapeDoConfig();
     }
 
@@ -33,7 +34,8 @@ public class HepsiburadaBarcodeSearchService
     public async Task SearchBarcodesFromExcelAsync(
         Stream excelStream,
         Func<int, string, string, Task> onProgress,
-        string? sessionId = null)
+        string? sessionId = null,
+        string? originalFileName = null)
     {
         var cts = new CancellationTokenSource();
         if (!string.IsNullOrEmpty(sessionId))
@@ -61,6 +63,8 @@ public class HepsiburadaBarcodeSearchService
             var progressLock = new object();
 
             using var semaphore = new SemaphoreSlim(MaxParallelRequests);
+            // Per-request throttle so concurrent requests don't block each other
+            using var throttle = new SemaphoreSlim(1, 1);
 
             var tasks = barcodes.Select(async (barcode, index) =>
             {
@@ -69,6 +73,11 @@ public class HepsiburadaBarcodeSearchService
                 {
                     if (cts.Token.IsCancellationRequested)
                         return;
+
+                    // Throttle: stagger requests so they don't all hit the API at once
+                    await throttle.WaitAsync(cts.Token);
+                    try { await Task.Delay(DelayBetweenRequestsMs, cts.Token); }
+                    finally { throttle.Release(); }
 
                     BarcodeSearchResult result;
                     try
@@ -129,8 +138,17 @@ public class HepsiburadaBarcodeSearchService
             {
                 await onProgress(95, "📊 Creating Excel report...", "info");
 
-                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                var fileName = $"HepsiburadaBarcode_{timestamp}.xlsx";
+                string fileName;
+                if (!string.IsNullOrEmpty(originalFileName))
+                {
+                    var fileNameWithoutExt = Path.GetFileNameWithoutExtension(originalFileName);
+                    fileName = $"{fileNameWithoutExt}_Results.xlsx";
+                }
+                else
+                {
+                    var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    fileName = $"HepsiburadaBarcode_{timestamp}.xlsx";
+                }
                 var filePath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
 
                 ExportResultsToExcel(resultsList, filePath);
@@ -277,7 +295,6 @@ public class HepsiburadaBarcodeSearchService
 
         var response = await _httpClient.GetAsync(apiUrl);
         response.EnsureSuccessStatusCode();
-
         return await response.Content.ReadAsStringAsync();
     }
 

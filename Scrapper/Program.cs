@@ -264,7 +264,8 @@ app.MapPost("/api/hepsiburada-barcode/search", async (HttpRequest request, Hepsi
             await barcodeService.SearchBarcodesFromExcelAsync(
                 memoryStream,
                 SseHelper.CreateProgressCallback(writer),
-                sessionId
+                sessionId,
+                file.FileName
             );
         }
         catch (Exception ex)
