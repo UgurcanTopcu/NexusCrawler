@@ -156,37 +156,13 @@ public class HepsiburadaScraperService
                 
                 try
                 {
-                    // Check if products have category hierarchy (for multi-sheet export)
-                    var hasCategories = products.Any(p => !string.IsNullOrEmpty(p.CategoryIdHierarchy));
-                    var uniqueCategories = products
-                        .Where(p => !string.IsNullOrEmpty(p.CategoryIdHierarchy))
-                        .Select(p => p.GetLeafCategoryId())
-                        .Distinct()
-                        .Count();
+                    var exporter = new ExcelExporter();
+                    exporter.ExportToExcel(products, filePath, excludePrice, processImages);
                     
-                    if (hasCategories && uniqueCategories > 1)
-                    {
-                        // Use category-based exporter for multiple categories
-                        await onProgress(92, $"Creating Excel with {uniqueCategories} category sheets...", "info");
-                        var categoryExporter = new ExcelExporterWithCategories();
-                        categoryExporter.ExportToExcel(products, filePath, excludePrice, processImages);
-                        
-                        var successMsg = $"Exported {products.Count} products in {uniqueCategories} category sheets!";
-                        if (skippedNoBarcodeCount > 0)
-                            successMsg += $" ({skippedNoBarcodeCount} skipped - no barcode)";
-                        await onProgress(100, successMsg, "success");
-                    }
-                    else
-                    {
-                        // Use standard exporter for single category or no categories
-                        var exporter = new ExcelExporter();
-                        exporter.ExportToExcel(products, filePath, excludePrice, processImages);
-                        
-                        var successMsg = $"Exported {products.Count} products!";
-                        if (skippedNoBarcodeCount > 0)
-                            successMsg += $" ({skippedNoBarcodeCount} skipped - no barcode)";
-                        await onProgress(100, successMsg, "success");
-                    }
+                    var successMsg = $"Exported {products.Count} products!";
+                    if (skippedNoBarcodeCount > 0)
+                        successMsg += $" ({skippedNoBarcodeCount} skipped - no barcode)";
+                    await onProgress(100, successMsg, "success");
                     
                     await SendComplete(onProgress, fileName, products.Count);
                 }

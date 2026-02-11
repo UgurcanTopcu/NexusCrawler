@@ -206,15 +206,28 @@ public class HepsiburadaBarcodeSearchService
 
         string? productUrl = null;
 
-        var productLinks = htmlDoc.DocumentNode.SelectNodes("//a[contains(@href, '-p-')]");
+        // Extract product name from various sources
+        ExtractProductName(html, htmlDoc, result);
+
+        // Extract category from various sources
+        ExtractCategory(html, htmlDoc, result);
+
+        // Match both old (-p-) and new (-pm-) Hepsiburada product URL patterns
+        var productLinks = htmlDoc.DocumentNode.SelectNodes("//a[contains(@href, '-pm-') or contains(@href, '-p-')]");
         if (productLinks != null && productLinks.Count > 0)
         {
             foreach (var link in productLinks)
             {
                 var href = link.GetAttributeValue("href", "");
-                if (!string.IsNullOrEmpty(href) && href.Contains("-p-"))
+                if (!string.IsNullOrEmpty(href) && Regex.IsMatch(href, @"-pm?-[A-Z0-9]+"))
                 {
                     productUrl = href;
+                    if (string.IsNullOrEmpty(result.ProductName))
+                    {
+                        var title = link.GetAttributeValue("title", "");
+                        if (!string.IsNullOrEmpty(title))
+                            result.ProductName = title;
+                    }
                     break;
                 }
             }
@@ -231,6 +244,12 @@ public class HepsiburadaBarcodeSearchService
                     if (!string.IsNullOrEmpty(href) && href.StartsWith("/"))
                     {
                         productUrl = href;
+                        if (string.IsNullOrEmpty(result.ProductName))
+                        {
+                            var title = link.GetAttributeValue("title", "");
+                            if (!string.IsNullOrEmpty(title))
+                                result.ProductName = title;
+                        }
                         break;
                     }
                 }
@@ -246,9 +265,15 @@ public class HepsiburadaBarcodeSearchService
                 {
                     var href = link.GetAttributeValue("href", "");
                     if (!string.IsNullOrEmpty(href) && 
-                        Regex.IsMatch(href, @"-p-[A-Z0-9]+"))
+                        Regex.IsMatch(href, @"-pm?-[A-Z0-9]+"))
                     {
                         productUrl = href;
+                        if (string.IsNullOrEmpty(result.ProductName))
+                        {
+                            var title = link.GetAttributeValue("title", "");
+                            if (!string.IsNullOrEmpty(title))
+                                result.ProductName = title;
+                        }
                         break;
                     }
                 }
@@ -286,6 +311,81 @@ public class HepsiburadaBarcodeSearchService
         }
         
         return result;
+    }
+
+    private void ExtractProductName(string html, HtmlDocument htmlDoc, BarcodeSearchResult result)
+    {
+        // Try title attribute from the product card link (search results page)
+        var productCardLink = htmlDoc.DocumentNode.SelectSingleNode(
+            "//a[contains(@class, 'productCardLink')][@title]" +
+            " | //a[contains(@href, '-pm-')][@title]" +
+            " | //a[contains(@href, '-p-')][@title]");
+        if (productCardLink != null)
+        {
+            var title = productCardLink.GetAttributeValue("title", "");
+            if (!string.IsNullOrEmpty(title))
+            {
+                result.ProductName = System.Net.WebUtility.HtmlDecode(title);
+                return;
+            }
+        }
+
+        // Try embedded JSON from variantList
+        if (string.IsNullOrEmpty(result.ProductName))
+        {
+            var nameMatch = Regex.Match(html, @"""variantList"":\s*\[\s*\{[^\}]*?""name""\s*:\s*""([^""]+)""", RegexOptions.Singleline);
+            if (nameMatch.Success)
+                result.ProductName = System.Net.WebUtility.HtmlDecode(nameMatch.Groups[1].Value);
+        }
+
+        // Try product name from search results JSON
+        if (string.IsNullOrEmpty(result.ProductName))
+        {
+            var nameMatch = Regex.Match(html, @"""productName""\s*:\s*""([^""]+)""");
+            if (nameMatch.Success)
+                result.ProductName = System.Net.WebUtility.HtmlDecode(nameMatch.Groups[1].Value);
+        }
+    }
+
+    private void ExtractCategory(string html, HtmlDocument htmlDoc, BarcodeSearchResult result)
+    {
+        // Try mainCategory from embedded JSON (e.g. "mainCategory":{"id":123,"name":"..."})
+        var mainCatMatch = Regex.Match(html, @"""mainCategory""\s*:\s*\{[^}]*?""name""\s*:\s*""([^""]+)""", RegexOptions.Singleline);
+        if (mainCatMatch.Success)
+        {
+            result.ProductCategory = System.Net.WebUtility.HtmlDecode(mainCatMatch.Groups[1].Value);
+            return;
+        }
+
+        // Try sidebar tree category div nodes (search results page)
+        // Categories render as <div class="seoAnchorLink-... treeCategoryContent-...">Text</div>
+        var treeCategoryNodes = htmlDoc.DocumentNode.SelectNodes(
+            "//*[contains(@class, 'seoAnchorLink') and contains(@class, 'treeCategoryContent')]");
+        if (treeCategoryNodes != null)
+        {
+            var categoryTexts = treeCategoryNodes
+                .Select(n => System.Net.WebUtility.HtmlDecode(n.InnerText.Trim()))
+                .Where(t => !string.IsNullOrWhiteSpace(t) && t != "Tüm kategoriler")
+                .Distinct()
+                .ToList();
+            if (categoryTexts.Count > 0)
+            {
+                result.ProductCategory = string.Join(" > ", categoryTexts);
+                return;
+            }
+        }
+
+        // Try categoryName from JSON, skip "Tüm kategoriler"
+        var catNameMatches = Regex.Matches(html, @"""categoryName""\s*:\s*""([^""]+)""");
+        foreach (Match m in catNameMatches)
+        {
+            var name = System.Net.WebUtility.HtmlDecode(m.Groups[1].Value);
+            if (!string.IsNullOrWhiteSpace(name) && name != "Tüm kategoriler")
+            {
+                result.ProductCategory = name;
+                return;
+            }
+        }
     }
 
     private async Task<string> GetPageHtmlAsync(string url)
@@ -346,9 +446,11 @@ public class HepsiburadaBarcodeSearchService
 
         worksheet.Cells[1, 1].Value = "Barcode";
         worksheet.Cells[1, 2].Value = "Status";
-        worksheet.Cells[1, 3].Value = "Product URL";
+        worksheet.Cells[1, 3].Value = "Product Name";
+        worksheet.Cells[1, 4].Value = "Product Category";
+        worksheet.Cells[1, 5].Value = "Product URL";
 
-        using (var range = worksheet.Cells[1, 1, 1, 3])
+        using (var range = worksheet.Cells[1, 1, 1, 5])
         {
             range.Style.Font.Bold = true;
             range.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
@@ -360,7 +462,9 @@ public class HepsiburadaBarcodeSearchService
         {
             worksheet.Cells[row, 1].Value = result.Barcode;
             worksheet.Cells[row, 2].Value = result.Status;
-            worksheet.Cells[row, 3].Value = result.ProductUrl ?? "";
+            worksheet.Cells[row, 3].Value = result.ProductName ?? "";
+            worksheet.Cells[row, 4].Value = result.ProductCategory ?? "";
+            worksheet.Cells[row, 5].Value = result.ProductUrl ?? "";
 
             var color = result.ProductExists ? System.Drawing.Color.LightGreen : System.Drawing.Color.LightCoral;
             worksheet.Cells[row, 2].Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
@@ -370,7 +474,7 @@ public class HepsiburadaBarcodeSearchService
         }
 
         worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns();
-        worksheet.Column(3).Width = 80;
+        worksheet.Column(5).Width = 80;
         package.SaveAs(new FileInfo(filePath));
     }
 
@@ -400,4 +504,6 @@ public class BarcodeSearchResult
     public bool ProductExists { get; set; }
     public string Status { get; set; } = "";
     public string? ProductUrl { get; set; }
+    public string? ProductName { get; set; }
+    public string? ProductCategory { get; set; }
 }

@@ -122,6 +122,7 @@ public class HepsiburadaScraper : IDisposable
                         d.FindElements(By.CssSelector("[class*='productCard']")).Count > 0 ||
                         d.FindElements(By.CssSelector("li[class*='product']")).Count > 0 ||
                         d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0 ||
+                        d.FindElements(By.CssSelector("a[href*='-pm-']")).Count > 0 ||
                         d.FindElements(By.CssSelector("a[href*='/p-']")).Count > 0
                     );
                 }
@@ -250,8 +251,8 @@ public class HepsiburadaScraper : IDisposable
                             return;
                         }
                         
-                        // Must contain -p- (product indicator)
-                        if (cleanHref.includes('-p-')) {
+                        // Must contain -p- or -pm- (product indicator)
+                        if (cleanHref.includes('-p-') || cleanHref.includes('-pm-')) {
                             seen[cleanHref] = true;
                             links.push(cleanHref);
                             stats.fromDirectLinks++;
@@ -268,8 +269,8 @@ public class HepsiburadaScraper : IDisposable
                     if (links.length < 30) {
                         console.log('[HB] Trying additional patterns...');
                         
-                        // Try /p- pattern
-                        document.querySelectorAll('a[href*=""/p-""]').forEach(function(link) {
+                        // Try /p- and -pm- patterns
+                        document.querySelectorAll('a[href*=""/p-""], a[href*=""-pm-""]').forEach(function(link) {
                             var href = link.href;
                             if (!href || !href.includes('hepsiburada.com')) return;
                             
@@ -283,7 +284,7 @@ public class HepsiburadaScraper : IDisposable
                         });
                         
                         // Try links ending with HB product codes
-                        document.querySelectorAll('a[href*=""hepsiburada.com""]').forEach(function(link) {
+                        document.querySelectorAll('a[href*=""hepsiburada.com""], a[href*=""-pm-""]').forEach(function(link) {
                             var href = link.href;
                             if (!href) return;
                             

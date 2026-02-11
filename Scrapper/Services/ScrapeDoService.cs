@@ -148,7 +148,7 @@ public class ScrapeDoService
                                     cleanUrl = redirectParam.Split('?')[0].Split('#')[0];
                                     
                                     // Check if it's a valid product URL
-                                    if (cleanUrl.Contains("-p-") && !cleanUrl.Contains("-c-") && !productLinks.Contains(cleanUrl))
+                                    if ((cleanUrl.Contains("-p-") || cleanUrl.Contains("-pm-")) && !cleanUrl.Contains("-c-") && !productLinks.Contains(cleanUrl))
                                     {
                                         productLinks.Add(cleanUrl);
                                         candidateCount++;
@@ -208,8 +208,8 @@ public class ScrapeDoService
                                 continue; // This is a category, not a product
                             }
                             
-                            // Pattern 1: Contains -p- (most common)
-                            if (path.Contains("-p-"))
+                            // Pattern 1: Contains -p- or -pm- (product indicator)
+                            if (path.Contains("-p-") || path.Contains("-pm-"))
                             {
                                 isValidProduct = true;
                             }
