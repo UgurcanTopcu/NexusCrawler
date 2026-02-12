@@ -60,22 +60,18 @@ public class BulkImageExcelReader
             
             if (worksheet == null)
             {
-                Console.WriteLine("[BulkImageReader] No worksheet found");
                 return data;
             }
 
             var dimension = worksheet.Dimension;
             if (dimension == null)
             {
-                Console.WriteLine("[BulkImageReader] Worksheet is empty");
                 return data;
             }
 
             data.TotalRows = dimension.End.Row;
             data.TotalColumns = dimension.End.Column;
 
-            Console.WriteLine($"[BulkImageReader] ========================================");
-            Console.WriteLine($"[BulkImageReader] Reading Excel: {data.TotalRows} rows x {data.TotalColumns} columns");
 
             // Read all cells and identify image URLs
             for (int row = 1; row <= data.TotalRows; row++)
@@ -136,9 +132,7 @@ public class BulkImageExcelReader
                     .ToList();
             }
 
-            Console.WriteLine($"[BulkImageReader] Found {data.ImageCells.Count} image URLs across {data.ImageColumns.Count} columns");
-            Console.WriteLine($"[BulkImageReader] Image columns: {string.Join(", ", data.ImageColumns.OrderBy(x => x))}");
-            Console.WriteLine($"[BulkImageReader] Data columns (preserved): {string.Join(", ", data.DataColumns.Except(data.ImageColumns).OrderBy(x => x))}");
+
             
             // Log sample URLs from different columns
             var samplesByColumn = data.ImageCells
@@ -150,14 +144,10 @@ public class BulkImageExcelReader
             {
                 var sample = columnGroup.First();
                 var header = hasHeader && data.Headers.Count >= sample.Column ? data.Headers[sample.Column - 1] : $"Col{sample.Column}";
-                Console.WriteLine($"[BulkImageReader] Sample from {header} (Col {sample.Column}): {sample.OriginalUrl.Substring(0, Math.Min(60, sample.OriginalUrl.Length))}...");
             }
-            
-            Console.WriteLine($"[BulkImageReader] ========================================");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[BulkImageReader] Error reading Excel: {ex.Message}");
             throw;
         }
 

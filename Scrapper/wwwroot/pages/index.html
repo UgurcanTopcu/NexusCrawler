@@ -4,195 +4,499 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scrapper - Category Scraper</title>
-    <link rel="stylesheet" href="/css/styles.css">
-</head>
-<body data-theme="purple">
-    <div class="container">
-        <h1>&#128295; Scrapper</h1>
-        <p class="subtitle">Extract product data from e-commerce sites</p>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
-        <!-- Navigation Buttons -->
-        <div class="nav-buttons">
-            <div class="nav-btn active" onclick="navigateTo('/')">
-                <h3>&#128722; Category Scraper</h3>
-                <p>Trendyol &amp; Hepsiburada</p>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+            min-height: 100vh;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+
+        .app-container { max-width: 900px; margin: 0 auto; }
+
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+        .header p { color: #94a3b8; font-size: 15px; }
+
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .nav-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 14px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .nav-item:hover {
+            background: rgba(139, 92, 246, 0.15);
+            border-color: rgba(139, 92, 246, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .nav-item.active {
+            background: rgba(139, 92, 246, 0.2);
+            border-color: #8b5cf6;
+        }
+
+        .nav-item h3 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .nav-item p { font-size: 11px; color: #94a3b8; }
+
+        .card {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-body { padding: 20px; }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .form-group { margin-bottom: 0; }
+        .form-group.full-width { grid-column: 1 / -1; }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #a78bfa;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            color: #e2e8f0;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #8b5cf6;
+            background: rgba(139, 92, 246, 0.1);
+        }
+
+        .form-group select option { background: #1e293b; color: #e2e8f0; }
+
+        .input-hint { font-size: 12px; color: #64748b; margin-top: 6px; }
+
+        .checkbox-group { display: flex; flex-direction: column; gap: 12px; }
+
+        .checkbox-item { display: flex; align-items: center; gap: 10px; }
+
+        .checkbox-item input[type="checkbox"] { width: 18px; height: 18px; accent-color: #8b5cf6; }
+
+        .checkbox-item label { font-size: 14px; color: #e2e8f0; cursor: pointer; margin: 0; }
+
+        .example-box {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 10px;
+            padding: 14px;
+            font-size: 13px;
+            color: #a78bfa;
+        }
+
+        .example-box strong { color: #c4b5fd; }
+
+        .action-buttons { display: flex; gap: 10px; margin-top: 20px; }
+
+        .btn {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-primary { background: linear-gradient(135deg, #8b5cf6, #6366f1); color: white; }
+        .btn-primary:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4); }
+
+        .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; display: none; }
+        .btn-danger.show { display: flex; }
+        .btn-danger:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4); }
+
+        .btn-secondary { background: rgba(255, 255, 255, 0.1); color: #e2e8f0; border: 1px solid rgba(255, 255, 255, 0.2); }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+
+        .progress-card { display: none; }
+        .progress-card.show { display: block; }
+
+        .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .progress-header span { font-size: 14px; color: #94a3b8; }
+        .progress-header .percent { font-size: 20px; font-weight: 700; color: #8b5cf6; }
+
+        .progress-track { height: 10px; background: rgba(139, 92, 246, 0.2); border-radius: 10px; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #8b5cf6, #6366f1); border-radius: 10px; width: 0%; transition: width 0.3s ease; }
+
+        .log-body { max-height: 300px; overflow-y: auto; padding: 0; }
+        .log-body::-webkit-scrollbar { width: 6px; }
+        .log-body::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
+        .log-body::-webkit-scrollbar-thumb { background: rgba(139, 92, 246, 0.3); border-radius: 3px; }
+
+        .log-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; color: #64748b; }
+        .log-empty span { font-size: 36px; margin-bottom: 10px; opacity: 0.5; }
+
+        .log-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+        .log-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+        .log-item.success .log-icon { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .log-item.error .log-icon { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .log-item.warning .log-icon { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .log-item.info .log-icon { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+
+        .log-content { flex: 1; min-width: 0; }
+        .log-message { font-size: 13px; line-height: 1.5; word-break: break-word; }
+
+        .log-item.success .log-message { color: #10b981; }
+        .log-item.error .log-message { color: #f87171; }
+        .log-item.warning .log-message { color: #fbbf24; }
+        .log-item.info .log-message { color: #e2e8f0; }
+
+        .log-time { font-size: 11px; color: #64748b; flex-shrink: 0; }
+
+        .btn-clear { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #f87171; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.2s ease; }
+        .btn-clear:hover { background: rgba(239, 68, 68, 0.2); }
+
+        .download-link { display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 12px 24px; border-radius: 10px; text-decoration: none; font-weight: 600; margin: 16px 20px; transition: all 0.2s ease; }
+        .download-link:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4); }
+
+        .footer { text-align: center; margin-top: 30px; }
+        .footer a { color: #8b5cf6; text-decoration: none; font-size: 14px; }
+        .footer a:hover { color: #a78bfa; }
+
+        @media (max-width: 768px) {
+            .nav-grid { grid-template-columns: repeat(2, 1fr); }
+            .form-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <h1>🔍 Scrapper</h1>
+            <p>Extract product data from e-commerce sites</p>
+        </div>
+
+        <div class="nav-grid" style="grid-template-columns: repeat(4, 1fr);">
+            <div class="nav-item active">
+                <h3>🛒 Category Scraper</h3>
+                <p>Trendyol & Hepsiburada</p>
             </div>
-            <div class="nav-btn" onclick="navigateTo('/akakce')">
-                <h3>&#128176; Akakce Scraper</h3>
+            <div class="nav-item" onclick="location.href='/akakce'">
+                <h3>💰 Akakce Lead Gen</h3>
                 <p>Price Comparison</p>
             </div>
-            <div class="nav-btn" onclick="navigateTo('/bulk-image')">
-                <h3>&#128444;&#65039; Bulk Image Uploader</h3>
-                <p>Process &amp; Upload Images</p>
+            <div class="nav-item" onclick="location.href='/hepsiburada-barcode'">
+                <h3>📊 Mirakl Catalogue</h3>
+                <p>Catalogue Analysis</p>
+            </div>
+            <div class="nav-item" onclick="location.href='/bulk-image'">
+                <h3>🖼️ Image Resizing</h3>
+                <p>Bulk Processing</p>
             </div>
         </div>
-        
-        <form id="scraperForm">
-            <div class="form-group">
-                <label for="platform">Platform</label>
-                <select id="platform" name="platform" onchange="updateExample()">
-                    <option value="trendyol">Trendyol</option>
-                    <option value="hepsiburada">Hepsiburada</option>
-                </select>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>⚙️ Scraper Settings</h2>
             </div>
-            
-            <div class="form-group">
-                <label for="categoryUrl">Category URL</label>
-                <input type="text" id="categoryUrl" name="categoryUrl" 
-                    placeholder="https://www.trendyol.com/yuz-kremi-x-c1122"
-                    value="https://www.trendyol.com/yuz-kremi-x-c1122" required>
+            <div class="card-body">
+                <form id="scraperForm">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Platform</label>
+                            <select id="platform" onchange="updateExample()">
+                                <option value="trendyol">Trendyol</option>
+                                <option value="hepsiburada">Hepsiburada</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Scraping Method</label>
+                            <select id="scrapeMethod">
+                                <option value="Selenium">Selenium (Free)</option>
+                                <option value="ScrapeDo">Scrape.do API (Faster)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label>Category URL</label>
+                            <input type="text" id="categoryUrl" 
+                                placeholder="https://www.trendyol.com/yuz-kremi-x-c1122"
+                                value="https://www.trendyol.com/yuz-kremi-x-c1122" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Maximum Products</label>
+                            <input type="number" id="maxProducts" min="1" value="20" required>
+                            <div class="input-hint">Enter any number - no limit</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Export Template</label>
+                            <select id="template">
+                                <option value="">Default (No Template)</option>
+                                <option value="trendyol_kettle">Trendyol Kettle (MediaMarkt)</option>
+                                <option value="trendyol_laptop">Trendyol Laptop (MediaMarkt)</option>
+                                <option value="trendyol_robot_vacuum">Trendyol Robot Vacuum</option>
+                                <option value="trendyol_dryer">Trendyol Dryer</option>
+                                <option value="trendyol_klima">Trendyol Klima</option>
+                                <option value="trendyol_water_heater">Trendyol Sofben</option>
+                                <option value="trendyol_cordless_vacuum_cleaner">Cordless Vacuum</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <div class="checkbox-group">
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="excludePrice">
+                                    <label for="excludePrice">Exclude Price from Excel</label>
+                                </div>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" id="processImages" checked>
+                                    <label for="processImages">Process & Upload Images to CDN</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <div class="example-box" id="exampleUrls">
+                                <strong>Example URLs:</strong><br>
+                                • Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122<br>
+                                • Skincare: https://www.trendyol.com/cilt-bakimi-x-c1121
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button type="submit" class="btn btn-primary" id="startBtn">
+                            <span>🚀</span> Start Scraping
+                        </button>
+                        <button type="button" class="btn btn-danger" id="stopBtn" onclick="handleStop()">
+                            <span>⛔</span> Stop
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="handleReset()">
+                            <span>🔄</span> Reset
+                        </button>
+                    </div>
+                </form>
             </div>
-            
-            <div class="form-group">
-                <label for="maxProducts">Maximum Products</label>
-                <input type="number" id="maxProducts" name="maxProducts" min="1" value="20" required>
-                <div class="input-hint">Enter any number - no limit</div>
-            </div>
-            
-            <div class="form-group">
-                <label for="scrapeMethod">Scraping Method</label>
-                <select id="scrapeMethod" name="scrapeMethod">
-                    <option value="Selenium">Selenium (Free)</option>
-                    <option value="ScrapeDo">Scrape.do API (Faster)</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label for="template">Export Template</label>
-                <select id="template" name="template">
-                    <option value="">Default (No Template)</option>
-                    <option value="trendyol_kettle">Trendyol Kettle (MediaMarkt)</option>
-                    <option value="trendyol_laptop">Trendyol Laptop (MediaMarkt)</option>
-                    <option value="trendyol_robot_vacuum">Trendyol Robot Vacuum (MediaMarkt)</option>
-                    <option value="trendyol_dryer">Trendyol Dryer (MediaMarkt)</option>
-                    <option value="trendyol_klima">Trendyol Klima (MediaMarkt)</option>
-                    <option value="trendyol_water_heater">Trendyol Sofben (MediaMarkt)</option>
-                    <option value="trendyol_cordless_vacuum_cleaner">Trendyol Cordless Vacuum Cleaner (MediaMarkt)</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <div class="checkbox-label">
-                    <input type="checkbox" id="excludePrice" name="excludePrice">
-                    <label for="excludePrice">Exclude Price from Excel</label>
+        </div>
+
+        <div class="card progress-card" id="progressCard">
+            <div class="card-body">
+                <div class="progress-header">
+                    <span>Progress</span>
+                    <span class="percent" id="progressPercent">0%</span>
                 </div>
-                <div class="checkbox-label">
-                    <input type="checkbox" id="processImages" name="processImages" checked>
-                    <label for="processImages">Process &amp; Upload Images to CDN</label>
+                <div class="progress-track">
+                    <div class="progress-bar" id="progressBar"></div>
                 </div>
             </div>
-            
-            <div class="example" id="exampleUrls">
-                <strong>Example URLs:</strong><br>
-                - Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122<br>
-                - Skincare: https://www.trendyol.com/cilt-bakimi-x-c1121
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>📋 Activity Log</h2>
+                <button class="btn-clear" onclick="clearLog()">Clear</button>
             </div>
-            
-            <div class="button-group">
-                <button type="submit" id="startBtn" class="btn-primary">Start Scraping</button>
-                <button type="button" id="stopBtn" class="btn-stop" onclick="handleStop()">Stop</button>
-                <button type="button" id="resetBtn" class="btn-reset" onclick="handleReset()">Reset</button>
+            <div class="log-body" id="logBody">
+                <div class="log-empty" id="logEmpty">
+                    <span>📋</span>
+                    <p>Configure settings and start scraping</p>
+                </div>
             </div>
-        </form>
-        
-        <div id="progress">
-            <div class="progress-bar">
-                <div class="progress-fill" id="progressFill">0%</div>
-            </div>
-            <div id="status"></div>
+        </div>
+
+        <div class="footer">
+            <a href="https://github.com/UgurcanTopcu/NexusCrawler" target="_blank">GitHub Repository</a>
         </div>
     </div>
-    
-    <script src="/js/scraper-common.js"></script>
+
     <script>
+        let isRunning = false;
+        let sessionId = null;
+
         function updateExample() {
             const platform = document.getElementById('platform').value;
             const exampleUrls = document.getElementById('exampleUrls');
             const categoryUrl = document.getElementById('categoryUrl');
             
             if (platform === 'hepsiburada') {
-                exampleUrls.innerHTML = '<strong>Example URLs (Hepsiburada):</strong><br>- Tablets: https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849';
+                exampleUrls.innerHTML = '<strong>Example URLs (Hepsiburada):</strong><br>• Tablets: https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849';
                 categoryUrl.value = 'https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849';
             } else {
-                exampleUrls.innerHTML = '<strong>Example URLs (Trendyol):</strong><br>- Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122';
+                exampleUrls.innerHTML = '<strong>Example URLs (Trendyol):</strong><br>• Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122';
                 categoryUrl.value = 'https://www.trendyol.com/yuz-kremi-x-c1122';
             }
         }
-        
+
+        function addLog(message, type = 'info') {
+            const logBody = document.getElementById('logBody');
+            const logEmpty = document.getElementById('logEmpty');
+            if (logEmpty) logEmpty.style.display = 'none';
+
+            const iconMap = { success: '✓', error: '✗', warning: '!', info: 'ℹ' };
+            
+            const item = document.createElement('div');
+            item.className = `log-item ${type}`;
+            item.innerHTML = `
+                <div class="log-icon">${iconMap[type] || 'ℹ'}</div>
+                <div class="log-content"><div class="log-message">${message}</div></div>
+                <div class="log-time">${new Date().toLocaleTimeString()}</div>
+            `;
+            
+            logBody.appendChild(item);
+            logBody.scrollTop = logBody.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('logBody').innerHTML = '<div class="log-empty" id="logEmpty"><span>📋</span><p>Log cleared</p></div>';
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressPercent').textContent = percent + '%';
+        }
+
         function handleReset() {
-            if (getIsRunning()) {
-                handleStop();
-            }
+            if (isRunning) handleStop();
             document.getElementById('scraperForm').reset();
-            resetProgressUI();
+            document.getElementById('progressCard').classList.remove('show');
             document.getElementById('startBtn').disabled = false;
-            document.getElementById('startBtn').textContent = 'Start Scraping';
-            document.getElementById('stopBtn').style.display = 'none';
+            document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Scraping';
+            document.getElementById('stopBtn').classList.remove('show');
+            updateProgress(0);
+            clearLog();
             updateExample();
         }
-        
+
         async function handleStop() {
-            await stopOperation('/api/stop/');
+            if (sessionId) {
+                await fetch('/api/stop/' + sessionId, { method: 'POST' });
+            }
+            isRunning = false;
             document.getElementById('startBtn').disabled = false;
-            document.getElementById('startBtn').textContent = 'Start Scraping';
-            document.getElementById('stopBtn').style.display = 'none';
-            addStatusMessage('Scraping stopped by user. Check for partial results below.', 'warning');
+            document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Scraping';
+            document.getElementById('stopBtn').classList.remove('show');
+            addLog('Scraping stopped by user', 'warning');
         }
-        
+
         document.getElementById('scraperForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const platform = document.getElementById('platform').value;
-            const categoryUrl = document.getElementById('categoryUrl').value;
-            const maxProducts = document.getElementById('maxProducts').value;
-            const excludePrice = document.getElementById('excludePrice').checked;
-            const processImages = document.getElementById('processImages').checked;
-            const scrapeMethod = document.getElementById('scrapeMethod').value;
-            const templateName = document.getElementById('template').value;
+            isRunning = true;
+            sessionId = 'session_' + Date.now();
             
             document.getElementById('startBtn').disabled = true;
-            document.getElementById('startBtn').textContent = 'Scraping...';
-            document.getElementById('stopBtn').style.display = 'block';
-            showProgress(true);
-            document.getElementById('status').innerHTML = '<div class="status-item">Starting scraper...</div>';
-            
-            await startSseStream('/api/scrape', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    platform,
-                    categoryUrl,
-                    maxProducts: parseInt(maxProducts),
-                    excludePrice,
-                    processImages,
-                    scrapeMethod,
-                    templateName: templateName || null,
-                    sessionId: getSessionId()
-                })
-            }, {
-                onProgress: updateProgressBar,
-                onMessage: addStatusMessage,
-                onDownload: (url, fileName) => {
-                    const status = document.getElementById('status');
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.className = 'download-link';
-                    link.textContent = 'Download Excel File';
-                    link.download = fileName;
-                    status.insertBefore(link, status.firstChild);
-                },
-                onComplete: () => {
-                    document.getElementById('startBtn').disabled = false;
-                    document.getElementById('startBtn').textContent = 'Start Scraping';
-                    document.getElementById('stopBtn').style.display = 'none';
-                },
-                onError: (message) => {
-                    document.getElementById('status').innerHTML = '<div class="status-item error">Error: ' + message + '</div>';
-                    document.getElementById('startBtn').disabled = false;
-                    document.getElementById('startBtn').textContent = 'Start Scraping';
-                    document.getElementById('stopBtn').style.display = 'none';
+            document.getElementById('startBtn').innerHTML = '<span>⏳</span> Scraping...';
+            document.getElementById('stopBtn').classList.add('show');
+            document.getElementById('progressCard').classList.add('show');
+            clearLog();
+
+            const formData = {
+                platform: document.getElementById('platform').value,
+                categoryUrl: document.getElementById('categoryUrl').value,
+                maxProducts: parseInt(document.getElementById('maxProducts').value),
+                scrapeMethod: document.getElementById('scrapeMethod').value,
+                templateName: document.getElementById('template').value || null,
+                excludePrice: document.getElementById('excludePrice').checked,
+                processImages: document.getElementById('processImages').checked,
+                sessionId: sessionId
+            };
+
+            addLog('Starting scraper...', 'info');
+
+            try {
+                const response = await fetch('/api/scrape', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const lines = decoder.decode(value).split('\n');
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                
+                                if (data.progress !== undefined) updateProgress(data.progress);
+                                if (data.message) addLog(data.message, data.type || 'info');
+                                
+                                if (data.downloadUrl) {
+                                    const link = document.createElement('a');
+                                    link.href = data.downloadUrl;
+                                    link.className = 'download-link';
+                                    link.innerHTML = '<span>⬇️</span> Download Excel';
+                                    document.getElementById('logBody').appendChild(link);
+                                }
+                            } catch (err) {}
+                        }
+                    }
                 }
-            });
+            } catch (err) {
+                addLog('Error: ' + err.message, 'error');
+            }
+
+            isRunning = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Scraping';
+            document.getElementById('stopBtn').classList.remove('show');
         });
     </script>
 </body>

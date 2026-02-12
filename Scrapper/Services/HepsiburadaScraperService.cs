@@ -5,16 +5,12 @@ namespace Scrapper.Services;
 
 public class HepsiburadaScraperService
 {
-    // Store cancellation tokens by session ID
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _sessions = new();
     
     public static void StopSession(string sessionId)
     {
         if (_sessions.TryRemove(sessionId, out var cts))
-        {
             cts.Cancel();
-            Console.WriteLine($"[HepsiburadaService] Session {sessionId} cancelled");
-        }
     }
     
     public async Task ScrapeWithProgressAsync(
@@ -26,20 +22,14 @@ public class HepsiburadaScraperService
         Func<int, string, string, Task> onProgress,
         string? sessionId = null)
     {
-        // Create cancellation token for this session
         var cts = new CancellationTokenSource();
         if (!string.IsNullOrEmpty(sessionId))
-        {
             _sessions[sessionId] = cts;
-        }
-        var cancellationToken = cts.Token;
         
         var products = new List<ProductInfo>();
         
         try
         {
-            // No limit - users can scrape as many products as they want
-            
             var methodName = scrapeMethod == ScrapeMethod.ScrapeDo ? "Scrape.do API" : "Selenium";
             await onProgress(0, $"Initializing scraper ({methodName})...", "info");
             
@@ -87,7 +77,7 @@ public class HepsiburadaScraperService
             for (int i = 0; i < linksToProcess.Count; i++)
             {
                 // Check for cancellation
-                if (cancellationToken.IsCancellationRequested)
+                if (cts.Token.IsCancellationRequested)
                 {
                     await onProgress((int)currentProgress, $"?? Stopped at product {i}/{linksToProcess.Count}", "warning");
                     break;
@@ -106,7 +96,7 @@ public class HepsiburadaScraperService
                     await onProgress((int)currentProgress, $"? {displayName}", "success");
                     
                     // Process images
-                    if (processImages && imageService != null && !cancellationToken.IsCancellationRequested)
+                    if (processImages && imageService != null && !cts.Token.IsCancellationRequested)
                     {
                         try
                         {
@@ -142,8 +132,9 @@ public class HepsiburadaScraperService
             if (products.Count > 0)
             {
                 var finalProgress = 90;
-                var stoppedText = cancellationToken.IsCancellationRequested ? " (stopped early)" : "";
-                await onProgress(finalProgress, $"Scraped {products.Count} products{stoppedText}. Creating Excel...", "info");
+                var stoppedText = cts.Token.IsCancellationRequested ? " (stopped early)" : "";
+                var skippedText = skippedNoBarcodeCount > 0 ? $" ({skippedNoBarcodeCount} skipped - no barcode)" : "";
+                await onProgress(finalProgress, $"Scraped {products.Count} products{stoppedText}{skippedText}. Creating Excel...", "info");
                 
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
                 var fileName = $"HepsiburadaProducts_{timestamp}.xlsx";
@@ -154,7 +145,11 @@ public class HepsiburadaScraperService
                     var exporter = new ExcelExporter();
                     exporter.ExportToExcel(products, filePath, excludePrice, processImages);
                     
-                    await onProgress(100, $"? Exported {products.Count} products!", "success");
+                    var successMsg = $"Exported {products.Count} products!";
+                    if (skippedNoBarcodeCount > 0)
+                        successMsg += $" ({skippedNoBarcodeCount} skipped - no barcode)";
+                    await onProgress(100, successMsg, "success");
+                    
                     await SendComplete(onProgress, fileName, products.Count);
                 }
                 catch (Exception excelEx)

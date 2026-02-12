@@ -36,7 +36,6 @@ public class ImageProcessingService
             var imageData = await DownloadImageAsync(imageUrl);
             if (imageData == null || imageData.Length == 0)
             {
-                Console.WriteLine($"Skipping image {imageIndex + 1}: Download failed or empty data");
                 return null;
             }
 
@@ -44,7 +43,6 @@ public class ImageProcessingService
             var resizedData = await ResizeImageAsync(imageData, imageUrl);
             if (resizedData == null || resizedData.Length == 0)
             {
-                Console.WriteLine($"Skipping image {imageIndex + 1}: Resize failed");
                 return null;
             }
 
@@ -62,7 +60,6 @@ public class ImageProcessingService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Image processing error for {imageUrl}: {ex.Message}");
             return null;
         }
     }
@@ -77,24 +74,21 @@ public class ImageProcessingService
         try
         {
             // DIAGNOSTIC: Log product identification
-            Console.WriteLine($"\n[Image Processing] ========================================");
-            Console.WriteLine($"[Image Processing] Product: {product.Name}");
-            Console.WriteLine($"[Image Processing] Source: {product.Source}");
-            Console.WriteLine($"[Image Processing] ProductId: {product.ProductId}");
-            Console.WriteLine($"[Image Processing] ProductUrl: {product.ProductUrl}");
-            Console.WriteLine($"[Image Processing] ========================================");
+
+
+
+
+
             
             // Validate product identification BEFORE processing
             if (string.IsNullOrEmpty(product.Source))
             {
-                Console.WriteLine($"[Image Processing] ? ERROR: Product.Source is empty! Skipping upload.");
                 await (onProgressMessage?.Invoke("? Product source missing - skipping upload") ?? Task.CompletedTask);
                 return (null, new List<string>());
             }
             
             if (string.IsNullOrEmpty(product.ProductId))
             {
-                Console.WriteLine($"[Image Processing] ? ERROR: Product.ProductId is empty! Skipping upload.");
                 await (onProgressMessage?.Invoke("? Product ID missing - skipping upload") ?? Task.CompletedTask);
                 return (null, new List<string>());
             }
@@ -102,7 +96,6 @@ public class ImageProcessingService
             // **FAST LOOKUP: Check CDN cache using pre-fetched folder list**
             if (_cdnCache.ProductExistsInCache(product.Source, product.ProductId))
             {
-                Console.WriteLine($"[Image Processing] ? CACHE HIT: {product.Source}/{product.ProductId}");
                 
                 // Generate URLs from cache (no HTTP requests needed)
                 var cachedMain = _cdnCache.GenerateCdnUrl(product.Source, product.ProductId, 0);
@@ -115,8 +108,6 @@ public class ImageProcessingService
                 await (onProgressMessage?.Invoke($"? Found cached images on CDN, skipping upload") ?? Task.CompletedTask);
                 return (cachedMain, cachedAdditional);
             }
-            
-            Console.WriteLine($"[Image Processing] CACHE MISS: {product.Source}/{product.ProductId} - will upload");
 
             // Get all image URLs
             var allImageUrls = product.GetAllImages();
@@ -124,15 +115,12 @@ public class ImageProcessingService
             if (allImageUrls.Count == 0)
             {
                 await (onProgressMessage?.Invoke("?? No images found for product") ?? Task.CompletedTask);
-                Console.WriteLine($"[Image Processing] ?? No images to process for product");
                 return (null, new List<string>());
             }
 
             // ? LIMIT: Only process first 3 images (1 main + 2 additional)
             const int MaxImagesToProcess = 3;
             var imagesToProcess = allImageUrls.Take(MaxImagesToProcess).ToList();
-            
-            Console.WriteLine($"[Image Processing] Processing {imagesToProcess.Count} of {allImageUrls.Count} images (limited to {MaxImagesToProcess})");
             await (onProgressMessage?.Invoke($"??? Processing {imagesToProcess.Count} images...") ?? Task.CompletedTask);
 
             int successCount = 0;
@@ -141,36 +129,30 @@ public class ImageProcessingService
             // Process main image
             if (imagesToProcess.Count > 0)
             {
-                Console.WriteLine($"[Image Processing] Uploading main image (1/{imagesToProcess.Count})...");
                 var cdnUrl = await ProcessAndUploadImageAsync(imagesToProcess[0], product, 0);
                 if (!string.IsNullOrEmpty(cdnUrl))
                 {
                     mainImageUrl = cdnUrl;
                     successCount++;
-                    Console.WriteLine($"[Image Processing] ? Main image uploaded: {cdnUrl}");
                 }
                 else
                 {
                     failCount++;
-                    Console.WriteLine($"[Image Processing] ? Main image upload failed");
                 }
             }
 
             // Process additional images (up to 2 more)
             for (int i = 1; i < imagesToProcess.Count; i++)
             {
-                Console.WriteLine($"[Image Processing] Uploading additional image ({i + 1}/{imagesToProcess.Count})...");
                 var cdnUrl = await ProcessAndUploadImageAsync(imagesToProcess[i], product, i);
                 if (!string.IsNullOrEmpty(cdnUrl))
                 {
                     additionalImageUrls.Add(cdnUrl);
                     successCount++;
-                    Console.WriteLine($"[Image Processing] ? Additional image {i + 1} uploaded: {cdnUrl}");
                 }
                 else
                 {
                     failCount++;
-                    Console.WriteLine($"[Image Processing] ? Additional image {i + 1} upload failed");
                 }
             }
 
@@ -185,15 +167,13 @@ public class ImageProcessingService
             {
                 statusMsg += $" ({failCount} failed)";
             }
-            Console.WriteLine($"[Image Processing] Summary: {statusMsg}");
             await (onProgressMessage?.Invoke(statusMsg) ?? Task.CompletedTask);
             
             return (mainImageUrl, additionalImageUrls);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Image Processing] ? EXCEPTION: {ex.Message}");
-            Console.WriteLine($"[Image Processing] Stack Trace: {ex.StackTrace}");
+
             return (null, new List<string>());
         }
     }
@@ -210,14 +190,12 @@ public class ImageProcessingService
                 // Validate URL
                 if (string.IsNullOrWhiteSpace(imageUrl) || !Uri.TryCreate(imageUrl, UriKind.Absolute, out _))
                 {
-                    Console.WriteLine($"Invalid image URL: {imageUrl}");
                     return null;
                 }
 
                 var response = await _httpClient.GetAsync(imageUrl);
                 if (!response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine($"Failed to download image (attempt {attempt}/{maxRetries}): {imageUrl} - Status: {response.StatusCode}");
                     
                     if (attempt < maxRetries)
                     {
@@ -231,13 +209,11 @@ public class ImageProcessingService
                 
                 if (imageData == null || imageData.Length == 0)
                 {
-                    Console.WriteLine($"Downloaded empty image data from: {imageUrl}");
                     return null;
                 }
 
                 if (imageData.Length < 1024)
                 {
-                    Console.WriteLine($"Downloaded image too small ({imageData.Length} bytes): {imageUrl}");
                     return null;
                 }
 
@@ -245,7 +221,6 @@ public class ImageProcessingService
             }
             catch (TaskCanceledException)
             {
-                Console.WriteLine($"Download timeout (attempt {attempt}/{maxRetries}) for {imageUrl}");
                 if (attempt < maxRetries)
                 {
                     await Task.Delay(2000);
@@ -255,7 +230,6 @@ public class ImageProcessingService
             }
             catch (HttpRequestException ex)
             {
-                Console.WriteLine($"Download error (attempt {attempt}/{maxRetries}) for {imageUrl}: {ex.Message}");
                 if (attempt < maxRetries)
                 {
                     await Task.Delay(1000 * attempt);
@@ -265,7 +239,6 @@ public class ImageProcessingService
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Unexpected download error for {imageUrl}: {ex.Message}");
                 return null;
             }
         }
@@ -280,7 +253,6 @@ public class ImageProcessingService
         {
             if (imageData == null || imageData.Length == 0)
             {
-                Console.WriteLine("Cannot resize: Empty image data");
                 return null;
             }
 
@@ -292,12 +264,10 @@ public class ImageProcessingService
             }
             catch (UnknownImageFormatException ex)
             {
-                Console.WriteLine($"Unsupported image format from {sourceUrl}: {ex.Message}");
                 return null;
             }
             catch (InvalidImageContentException ex)
             {
-                Console.WriteLine($"Invalid image content from {sourceUrl}: {ex.Message}");
                 return null;
             }
 
@@ -325,7 +295,6 @@ public class ImageProcessingService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Resize error: {ex.Message}");
             return null;
         }
     }

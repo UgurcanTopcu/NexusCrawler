@@ -1,4 +1,4 @@
-﻿using HtmlAgilityPack;
+using HtmlAgilityPack;
 using Scrapper.Models;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -11,26 +11,54 @@ namespace Scrapper.Services;
 
 /// <summary>
 /// Scraper for Akakce product pages - extracts product info and all seller listings
-/// Uses Edge with persistent profile and advanced anti-detection to bypass Cloudflare
+/// Uses Edge with the user's actual profile to bypass Cloudflare
 /// </summary>
 public class AkakceScraper : IDisposable
 {
     private readonly HttpClient _httpClient;
-    private IWebDriver? _driver;
+    
+    // STATIC driver - shared across all instances to prevent multiple Edge windows
+    private static IWebDriver? _driver;
+    private static readonly object _driverLock = new object();
+    private static bool _initializationAttempted = false;
+    
     private const string BaseUrl = "https://www.akakce.com";
-    private static readonly string UserDataDir = Path.Combine(Path.GetTempPath(), "AkakceEdgeProfile");
+    
+    // User's real Edge profile (source for copying)
+    private static readonly string SourceProfileDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Microsoft", "Edge", "User Data");
+    
+    // Separate profile for scraper (so we don't lock user's profile)
+    private static readonly string ScraperProfileDir = Path.Combine(
+        Path.GetTempPath(), "AkakceScraperProfile");
+    
     private static readonly Random _random = new Random();
     private int _productsScrapedSinceLastChallenge = 0;
     private bool _cloudflareDetected = false;
     
+    // Remote debugging port for connecting to existing Edge
+    private const int DEBUGGING_PORT = 9222;
+
+    
+    
+
+    
+    
+    // Delay settings - SHORT since using real profile (no Cloudflare)
+    private const int MIN_DELAY_SEARCH = 1;
+    private const int MAX_DELAY_SEARCH = 2;
+    
     // Minimum delay between product page loads (in seconds)
-    // Reduced from 5-10 to 2-4 for faster scraping when no Cloudflare
     private const int MIN_DELAY_BETWEEN_PRODUCTS = 2;
     private const int MAX_DELAY_BETWEEN_PRODUCTS = 4;
     
     // Cloudflare mode delays (only used when Cloudflare is detected)
     private const int MIN_DELAY_CLOUDFLARE = 5;
-    private const int MAX_DELAY_CLOUDFLARE = 8;
+    private const int MAX_DELAY_CLOUDFLARE = 10;
+    
+    // Cloudflare wait timeout (seconds)
+    private const int CLOUDFLARE_WAIT_TIMEOUT = 30;
     
     // User agent rotation list - realistic Edge versions
     private static readonly string[] UserAgents = new[]
@@ -51,75 +79,358 @@ public class AkakceScraper : IDisposable
 
     private static string GetRandomUserAgent() => UserAgents[_random.Next(UserAgents.Length)];
     
+    /// <summary>
+    /// Find the active/most recently used Edge profile name
+    /// Returns: "Default", "Profile 1", "Profile 2", etc.
+    /// </summary>
+    private static string? FindActiveEdgeProfile()
+    {
+        try
+        {
+            if (!Directory.Exists(SourceProfileDir))
+            {
+                return null;
+            }
+            
+            // Look for profile directories
+            var profileDirs = new List<(string name, string path)>();
+            
+            // Check Default profile
+            var defaultProfile = Path.Combine(SourceProfileDir, "Default");
+            if (Directory.Exists(defaultProfile))
+            {
+                profileDirs.Add(("Default", defaultProfile));
+            }
+            
+            // Check Profile 1, Profile 2, etc.
+            for (int i = 1; i <= 10; i++)
+            {
+                var profilePath = Path.Combine(SourceProfileDir, $"Profile {i}");
+                if (Directory.Exists(profilePath))
+                {
+                    profileDirs.Add(($"Profile {i}", profilePath));
+                }
+            }
+            
+            // Find the profile with the most recent History file (indicates active use)
+            string? bestProfile = null;
+            DateTime latestTime = DateTime.MinValue;
+            
+            foreach (var (name, path) in profileDirs)
+            {
+                // Check History file (more reliable than cookies for recent use)
+                var historyFile = Path.Combine(path, "History");
+                if (File.Exists(historyFile))
+                {
+                    var lastWrite = File.GetLastWriteTime(historyFile);
+                    
+                    if (lastWrite > latestTime)
+                    {
+                        latestTime = lastWrite;
+                        bestProfile = name;
+                    }
+                }
+            }
+            
+            if (bestProfile != null)
+            {
+            }
+            
+            return bestProfile;
+        }
+        catch (Exception ex)
+        {
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Copy user's Edge profile to a separate directory for the scraper
+    /// This allows Edge to run alongside while we use a copy of the profile
+    /// </summary>
+    private static void CopyProfileForScraper()
+    {
+        try
+        {
+            // Create scraper profile directory
+            var scraperDefaultDir = Path.Combine(ScraperProfileDir, "Default");
+            if (!Directory.Exists(scraperDefaultDir))
+            {
+                Directory.CreateDirectory(scraperDefaultDir);
+                var networkDir = Path.Combine(scraperDefaultDir, "Network");
+                Directory.CreateDirectory(networkDir);
+            }
+            
+            // Find user's active profile
+            string profileName = FindActiveEdgeProfile() ?? "Default";
+            var sourceProfilePath = Path.Combine(SourceProfileDir, profileName);
+            
+            // Copy cookies (most important for bypassing Cloudflare)
+            var sourceCookies = Path.Combine(sourceProfilePath, "Network", "Cookies");
+            var destCookies = Path.Combine(scraperDefaultDir, "Network", "Cookies");
+            if (File.Exists(sourceCookies))
+            {
+                File.Copy(sourceCookies, destCookies, overwrite: true);
+            }
+            
+            // Copy Local State (encryption keys)
+            var sourceLocalState = Path.Combine(SourceProfileDir, "Local State");
+            var destLocalState = Path.Combine(ScraperProfileDir, "Local State");
+            if (File.Exists(sourceLocalState))
+            {
+                File.Copy(sourceLocalState, destLocalState, overwrite: true);
+            }
+            
+            // Copy Preferences (site settings)
+            var sourcePrefs = Path.Combine(sourceProfilePath, "Preferences");
+            var destPrefs = Path.Combine(scraperDefaultDir, "Preferences");
+            if (File.Exists(sourcePrefs))
+            {
+                File.Copy(sourcePrefs, destPrefs, overwrite: true);
+            }
+        }
+        catch (Exception ex)
+        {
+
+        }
+    }
+    
     private static async Task RandomDelay(int minMs = 500, int maxMs = 1500)
     {
         await Task.Delay(_random.Next(minMs, maxMs));
     }
 
-    private void InitializeDriver()
+    /// <summary>
+    /// Warm up the browser by connecting to existing Edge or providing setup instructions.
+    /// </summary>
+    public async Task<bool> WarmupAsync(Func<int, string, string, Task>? onProgress = null)
     {
-        if (_driver == null)
+        try
         {
-            Console.WriteLine("[Akakce] Initializing Edge with enhanced anti-detection...");
-            Console.WriteLine($"[Akakce] Profile directory: {UserDataDir}");
+
+
             
-            // Create profile directory if it doesn't exist
-            if (!Directory.Exists(UserDataDir))
+            if (onProgress != null)
             {
-                Directory.CreateDirectory(UserDataDir);
+                await onProgress(5, "?? Connecting to your Edge browser...", "info");
             }
             
+            // Try to connect to existing Edge with debugging port
+            bool connected = await TryConnectToExistingEdgeAsync();
+            
+            if (!connected)
+            {
+                // Show setup instructions
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+                if (onProgress != null)
+                {
+                    await onProgress(10, "? Setup required - see console for instructions", "error");
+                }
+                return false;
+            }
+            
+            // Navigate to Akakce to verify
+            if (onProgress != null)
+            {
+                await onProgress(7, "? Navigating to Akakce...", "info");
+            }
+            
+            _driver!.Navigate().GoToUrl("https://www.akakce.com/");
+            await Task.Delay(3000);
+            
+            var title = _driver.Title ?? "";
+            
+            // Check for Cloudflare
+            bool isCloudflare = title.Contains("Bir dakika", StringComparison.OrdinalIgnoreCase) ||
+                               title.Contains("Just a moment", StringComparison.OrdinalIgnoreCase) ||
+                               string.IsNullOrWhiteSpace(title);
+            
+            if (isCloudflare)
+            {
+
+                if (onProgress != null)
+                {
+                    await onProgress(10, "?? Cloudflare detected - visit akakce.com in Edge first", "warning");
+                }
+                return false;
+            }
+            if (onProgress != null)
+            {
+                await onProgress(10, "? Connected to your Edge - ready to search!", "success");
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (onProgress != null)
+            {
+                await onProgress(10, $"? Error: {ex.Message}", "error");
+            }
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// Connect to an existing Edge browser that was started with --remote-debugging-port=9222
+    /// </summary>
+    private async Task<bool> TryConnectToExistingEdgeAsync()
+    {
+        lock (_driverLock)
+        {
+            // If we already have a working driver, use it
+            if (_driver != null)
+            {
+                try
+                {
+                    var _ = _driver.WindowHandles;
+                    return true;
+                }
+                catch
+                {
+                    try { _driver.Quit(); } catch { }
+                    _driver = null;
+                    _initializationAttempted = false;
+                }
+            }
+            
+            // Check if port 9222 is open (Edge with debugging is running)
+            try
+            {
+                using var client = new System.Net.Sockets.TcpClient();
+                var result = client.BeginConnect("127.0.0.1", DEBUGGING_PORT, null, null);
+                var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2));
+                
+                if (!success || !client.Connected)
+                {
+                    return false;
+                }
+                client.Close();
+            }
+            catch
+            {
+                return false;
+            }
+            
+            // Port is open, try to connect with Selenium
+            try
+            {
+                
+                var options = new EdgeOptions();
+                options.DebuggerAddress = $"127.0.0.1:{DEBUGGING_PORT}";
+                
+                var service = EdgeDriverService.CreateDefaultService();
+                service.SuppressInitialDiagnosticInformation = true;
+                service.HideCommandPromptWindow = true;
+                
+                _driver = new EdgeDriver(service, options, TimeSpan.FromSeconds(10));
+                _initializationAttempted = true;
+                
+                // Verify connection
+                var handles = _driver.WindowHandles;
+                
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _driver = null;
+                return false;
+            }
+        }
+    }
+
+
+    private void InitializeDriver()
+    {
+        // This method is now a no-op for the search service
+        // Connection is handled by TryConnectToExistingEdgeAsync
+        // We keep this for backwards compatibility with the category scraper
+        
+        lock (_driverLock)
+        {
+            // If driver already exists and is working, reuse it
+            if (_driver != null)
+            {
+                try
+                {
+                    var _ = _driver.WindowHandles;
+                    return;
+                }
+                catch
+                {
+                    try { _driver?.Quit(); } catch { }
+                    _driver = null;
+                    _initializationAttempted = false;
+                }
+            }
+            
+            if (_initializationAttempted && _driver == null)
+            {
+                return;
+            }
+            
+            _initializationAttempted = true;
+            
+            // For the category scraper, start Edge with a fresh profile
+            
             var options = new EdgeOptions();
-
-            // Use persistent profile - this helps bypass Cloudflare after first manual verification
-            options.AddArgument($"--user-data-dir={UserDataDir}");
+            
+            // Use separate profile directory for scraper
+            if (!Directory.Exists(ScraperProfileDir))
+            {
+                Directory.CreateDirectory(ScraperProfileDir);
+            }
+            options.AddArgument($"--user-data-dir={ScraperProfileDir}");
             options.AddArgument("--profile-directory=Default");
-
-            // CRITICAL: NOT headless - required for Cloudflare bypass
-            // Headless mode is easily detected by Cloudflare
-
-            // Window and display settings
+            
+            // Enable remote debugging so we can reconnect
+            options.AddArgument($"--remote-debugging-port={DEBUGGING_PORT}");
+            
+            // Prevent popups
+            options.AddArgument("--no-first-run");
+            options.AddArgument("--no-default-browser-check");
+            options.AddArgument("--disable-popup-blocking");
+            
+            // CRITICAL: NOT headless
             options.AddArgument("--window-size=1920,1080");
             options.AddArgument("--start-maximized");
             options.AddArgument("--disable-gpu");
             options.AddArgument("--no-sandbox");
-            options.AddArgument("--disable-dev-shm-usage");
             
-            // === ANTI-DETECTION MEASURES ===
-            
-            // 1. Disable automation flags
+            // Anti-detection
             options.AddArgument("--disable-blink-features=AutomationControlled");
             options.AddExcludedArgument("enable-automation");
             options.AddAdditionalOption("useAutomationExtension", false);
-            
-            // 2. Disable infobars and automation notifications
             options.AddArgument("--disable-infobars");
-            options.AddArgument("--disable-notifications");
             
-            // 3. Use random realistic user agent
+            // Realistic user agent
             var userAgent = GetRandomUserAgent();
             options.AddArgument($"user-agent={userAgent}");
-            Console.WriteLine($"[Akakce] Using User-Agent: {userAgent.Substring(0, 60)}...");
             
-            // 4. Disable extensions and default apps (cleaner fingerprint)
-            options.AddArgument("--disable-extensions");
-            options.AddArgument("--disable-default-apps");
-            options.AddArgument("--disable-component-update");
-            options.AddArgument("--no-first-run");
-            options.AddArgument("--no-default-browser-check");
-            
-            // 5. Enable features that real browsers have
-            options.AddArgument("--enable-features=NetworkService,NetworkServiceInProcess");
-            
-            // 6. Set language to Turkish (matches Akakce)
+            // Language
             options.AddArgument("--lang=tr-TR");
             options.AddUserProfilePreference("intl.accept_languages", "tr-TR,tr,en-US,en");
-            
-            // 7. Disable password manager and other obvious automation tells
             options.AddUserProfilePreference("credentials_enable_service", false);
             options.AddUserProfilePreference("profile.password_manager_enabled", false);
             
-            // 8. Suppress logging
+            // Suppress logging
             options.AddArgument("--log-level=3");
             options.AddArgument("--silent");
             
@@ -130,23 +441,18 @@ public class AkakceScraper : IDisposable
             try
             {
                 _driver = new EdgeDriver(service, options, TimeSpan.FromMinutes(3));
-                
-                // Set page load timeout
                 _driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(60);
                 _driver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(10);
                 
-                // CRITICAL: Inject anti-detection scripts BEFORE any navigation
+                // Inject anti-detection scripts
                 InjectAntiDetectionScripts();
-                
-                Console.WriteLine("[Akakce] ✓ Edge driver initialized with anti-detection");
+
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Akakce] ✗ Error initializing Edge: {ex.Message}");
-                Console.WriteLine("[Akakce] TIP: Close any existing Edge windows and try again");
                 throw;
             }
-        }
+        } // end lock
     }
 
     /// <summary>
@@ -236,19 +542,15 @@ public class AkakceScraper : IDisposable
                 "Page.addScriptToEvaluateOnNewDocument",
                 new Dictionary<string, object> { ["source"] = antiDetectionScript }
             );
-            
-            Console.WriteLine("[Akakce] ✓ Anti-detection scripts injected via CDP");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] ⚠ CDP injection failed: {ex.Message}");
             
             // Fallback: Direct JavaScript injection
             try
             {
                 var jsExecutor = (IJavaScriptExecutor)_driver;
                 jsExecutor.ExecuteScript("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})");
-                Console.WriteLine("[Akakce] ✓ Fallback anti-detection applied");
             }
             catch { }
         }
@@ -305,7 +607,6 @@ public class AkakceScraper : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] Human simulation skipped: {ex.Message}");
         }
     }
 
@@ -318,7 +619,6 @@ public class AkakceScraper : IDisposable
         
         try
         {
-            Console.WriteLine("[Akakce] Looking for Turnstile checkbox...");
             
             // Wait a bit for the checkbox to be clickable
             await Task.Delay(2000);
@@ -370,7 +670,6 @@ public class AkakceScraper : IDisposable
             
             if (clicked != null && (bool)clicked)
             {
-                Console.WriteLine("[Akakce] ? Clicked Turnstile element");
                 await Task.Delay(3000); // Wait for verification
                 return true;
             }
@@ -395,7 +694,6 @@ public class AkakceScraper : IDisposable
                                 await Task.Delay(500);
                                 
                                 element.Click();
-                                Console.WriteLine("[Akakce] ? Clicked verify element");
                                 await Task.Delay(3000);
                                 return true;
                             }
@@ -406,16 +704,12 @@ public class AkakceScraper : IDisposable
                 catch { }
                 
                 // Wait and retry
-                Console.WriteLine("[Akakce] Retry clicking Turnstile checkbox...");
                 await Task.Delay(2000);
             }
-            
-            Console.WriteLine("[Akakce] Could not find Turnstile checkbox - manual action may be required");
             return false;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] Turnstile click error: {ex.Message}");
             return false;
         }
     }
@@ -426,8 +720,6 @@ public class AkakceScraper : IDisposable
     private async Task<bool> WaitForCloudflareWithHumanBehavior(int maxWaitSeconds = 90)
     {
         if (_driver == null) return false;
-        
-        Console.WriteLine("[Akakce] Checking for Cloudflare challenge...");
         
         var startTime = DateTime.Now;
         bool wasCloudflare = false;
@@ -465,7 +757,6 @@ public class AkakceScraper : IDisposable
                 if (hasTurnstile && !turnstileClickAttempted)
                 {
                     turnstileClickAttempted = true;
-                    Console.WriteLine("[Akakce] 🔐 Turnstile challenge detected - attempting to solve...");
                     
                     if (await TryClickTurnstileCheckbox())
                     {
@@ -474,13 +765,11 @@ public class AkakceScraper : IDisposable
                     }
                     else
                     {
-                        Console.WriteLine("[Akakce] ✋ Please click the 'Verify you are human' checkbox manually...");
                     }
                 }
                 
                 if (elapsed % 10 == 0)
                 {
-                    Console.WriteLine($"[Akakce] ⏳ Waiting for Cloudflare... ({elapsed}s)");
                     
                     // Simulate human behavior while waiting
                     await SimulateHumanBehavior();
@@ -492,12 +781,10 @@ public class AkakceScraper : IDisposable
             {
                 if (wasCloudflare)
                 {
-                    Console.WriteLine($"[Akakce] ✅ Cloudflare challenge passed! (took {(int)(DateTime.Now - startTime).TotalSeconds}s)");
                     _productsScrapedSinceLastChallenge = 0; // Reset counter
                 }
                 else
                 {
-                    Console.WriteLine("[Akakce] ✅ No Cloudflare challenge detected");
                 }
                 return true;
             }
@@ -506,9 +793,7 @@ public class AkakceScraper : IDisposable
                 await Task.Delay(500);
             }
         }
-        
-        Console.WriteLine($"[Akakce] ⏰ Cloudflare challenge timeout after {maxWaitSeconds}s");
-        Console.WriteLine("[Akakce] TIP: Solve the CAPTCHA manually, then the scraping will continue");
+
         return false;
     }
 
@@ -521,7 +806,6 @@ public class AkakceScraper : IDisposable
         {
             try
             {
-                Console.WriteLine($"[Akakce] Loading: {url.Substring(0, Math.Min(80, url.Length))}... (attempt {attempt}/{maxRetries})");
                 
                 // Add delay between products - use shorter delay if no Cloudflare detected
                 if (_productsScrapedSinceLastChallenge > 0)
@@ -529,7 +813,6 @@ public class AkakceScraper : IDisposable
                     int minDelay = _cloudflareDetected ? MIN_DELAY_CLOUDFLARE : MIN_DELAY_BETWEEN_PRODUCTS;
                     int maxDelay = _cloudflareDetected ? MAX_DELAY_CLOUDFLARE : MAX_DELAY_BETWEEN_PRODUCTS;
                     var delaySeconds = _random.Next(minDelay, maxDelay);
-                    Console.WriteLine($"[Akakce] ⏳ Waiting {delaySeconds}s before loading...");
                     await Task.Delay(delaySeconds * 1000);
                 }
                 
@@ -543,7 +826,6 @@ public class AkakceScraper : IDisposable
                 if (attempt > 1)
                 {
                     var retryDelay = _random.Next(3000, 6000) * attempt;
-                    Console.WriteLine($"[Akakce] Retry delay: {retryDelay / 1000}s...");
                     await Task.Delay(retryDelay);
                 }
                 
@@ -564,15 +846,207 @@ public class AkakceScraper : IDisposable
             }
             catch (WebDriverTimeoutException)
             {
-                Console.WriteLine($"[Akakce] Page load timeout on attempt {attempt}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Akakce] Navigation error: {ex.Message}");
             }
         }
         
         return false;
+    }
+
+    /// <summary>
+    /// Search for a product by name and return the first result's URL
+    /// Uses the Akakce search form: /arama/?q={query}
+    /// </summary>
+    public async Task<string?> SearchProductAsync(string productName)
+    {
+        if (string.IsNullOrWhiteSpace(productName))
+        {
+            return null;
+        }
+
+        try
+        {
+            // Don't call InitializeDriver - we must be connected via WarmupAsync
+            if (_driver == null)
+            {
+                return null;
+            }
+            
+            // Short delay before search
+            var preSearchDelay = _random.Next(MIN_DELAY_SEARCH, MAX_DELAY_SEARCH);
+            await Task.Delay(preSearchDelay * 1000);
+            
+            // URL encode the product name for search
+            var encodedQuery = System.Net.WebUtility.UrlEncode(productName.Trim());
+            var searchUrl = $"https://www.akakce.com/arama/?q={encodedQuery}";
+
+            
+            // Navigate directly
+            _driver.Navigate().GoToUrl(searchUrl);
+            
+            // Wait for page to load
+            await Task.Delay(3000);
+
+            
+            // Check if we were redirected directly to a product page
+            var currentUrl = _driver.Url;
+            if (IsProductUrl(currentUrl))
+            {
+                return currentUrl;
+            }
+            
+            // Check for Cloudflare
+            var title = _driver.Title ?? "";
+            if (title.Contains("Bir dakika", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("Just a moment", StringComparison.OrdinalIgnoreCase))
+            {
+
+                return null;
+            }
+            
+            // Extract first product URL from search results
+            var jsExecutor = (IJavaScriptExecutor)_driver;
+
+            
+            // Scroll to load lazy content
+            jsExecutor.ExecuteScript("window.scrollTo(0, 300);");
+            await RandomDelay(500, 1000);
+            
+            var firstProductUrl = jsExecutor.ExecuteScript(@"
+                // Method 1: Look for product links in search results list
+                var productList = document.querySelector('ul#CPL') || 
+                                 document.querySelector('ul.pl_v9.qv_v9') ||
+                                 document.querySelector('ul.pl_v9');
+                
+                if (productList) {
+                    var firstProduct = productList.querySelector('li[data-pr] a[href]');
+                    if (firstProduct) {
+                        var href = firstProduct.getAttribute('href');
+                        if (href && href.match(/,\d+\.html$/)) {
+                            console.log('[Akakce Search] Found product in list: ' + href);
+                            return href.startsWith('/') ? 'https://www.akakce.com' + href : href;
+                        }
+                    }
+                }
+                
+                // Method 2: Look for any product link matching the pattern
+                var allLinks = document.querySelectorAll('a[href*="",""][href$="".html""]');
+                for (var i = 0; i < allLinks.length; i++) {
+                    var href = allLinks[i].getAttribute('href');
+                    if (href && href.match(/,\d+\.html$/)) {
+                        console.log('[Akakce Search] Found product link: ' + href);
+                        return href.startsWith('/') ? 'https://www.akakce.com' + href : href;
+                    }
+                }
+                
+                // Method 3: Check if page shows 'no results' message
+                var noResults = document.querySelector('.no-result') || 
+                               document.querySelector('[class*=""noResult""]') ||
+                               document.querySelector('[class*=""empty""]');
+                if (noResults) {
+                    console.log('[Akakce Search] No results found');
+                    return 'NO_RESULTS';
+                }
+                
+                console.log('[Akakce Search] No product links found on page');
+                return null;
+            ");
+            
+            if (firstProductUrl == null || string.IsNullOrEmpty(firstProductUrl.ToString()))
+            {
+                return null;
+            }
+            
+            var productUrl = firstProductUrl.ToString()!;
+            
+            if (productUrl == "NO_RESULTS")
+            {
+                return null;
+            }
+            
+            // Validate it's a proper product URL
+            if (!IsProductUrl(productUrl))
+            {
+                return null;
+            }
+            return productUrl;
+        }
+        catch (Exception ex)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Simple navigation that waits for Cloudflare challenge to complete
+    /// </summary>
+    private async Task<bool> NavigateSimple(string url, int timeoutSeconds = 30)
+    {
+        if (_driver == null) return false;
+        
+        try
+        {
+            
+            _driver.Navigate().GoToUrl(url);
+            
+            // Wait for initial page load
+            await Task.Delay(_random.Next(3000, 5000));
+            
+            // Check for Cloudflare and wait for it to complete
+            var startTime = DateTime.Now;
+            var maxWaitTime = TimeSpan.FromSeconds(timeoutSeconds);
+            
+            while ((DateTime.Now - startTime) < maxWaitTime)
+            {
+                var title = _driver.Title ?? "";
+                var pageUrl = _driver.Url ?? "";
+                
+                // Check if we're past Cloudflare
+                bool isCloudflare = title.Contains("Bir dakika", StringComparison.OrdinalIgnoreCase) ||
+                                   title.Contains("Just a moment", StringComparison.OrdinalIgnoreCase) ||
+                                   title.Contains("l�tfen", StringComparison.OrdinalIgnoreCase) ||
+                                   title.Contains("Attention", StringComparison.OrdinalIgnoreCase) ||
+                                   title.Contains("Checking", StringComparison.OrdinalIgnoreCase);
+                
+                if (!isCloudflare && title.Length > 5)
+                {
+                    return true;
+                }
+                
+                var elapsed = (int)(DateTime.Now - startTime).TotalSeconds;
+                if (elapsed % 10 == 0 && elapsed > 0)
+                {
+                }
+                
+                await Task.Delay(1000);
+            }
+            
+            // Timeout - check final state
+            var finalTitle = _driver.Title ?? "";
+            
+            return !finalTitle.Contains("Bir dakika", StringComparison.OrdinalIgnoreCase) &&
+                   !finalTitle.Contains("Just a moment", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (WebDriverTimeoutException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Check if a URL is a valid Akakce product page URL
+    /// </summary>
+    private bool IsProductUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return false;
+        return url.Contains("akakce.com") && 
+               System.Text.RegularExpressions.Regex.IsMatch(url, @",\d+\.html$");
     }
 
     /// <summary>
@@ -593,11 +1067,9 @@ public class AkakceScraper : IDisposable
             if (idMatch.Success)
             {
                 product.ProductId = idMatch.Groups[1].Value;
-                Console.WriteLine($"[Akakce] Product ID: {product.ProductId}");
             }
             else
             {
-                Console.WriteLine($"[Akakce] WARNING: Could not extract product ID from URL: {productUrl}");
                 product.ErrorMessage = "Invalid product URL format";
                 return product;
             }
@@ -613,7 +1085,6 @@ public class AkakceScraper : IDisposable
             }
             
             // Scroll to trigger lazy loading - reduced iterations from 5 to 3
-            Console.WriteLine("[Akakce] Loading seller list...");
             var jsExecutor = (IJavaScriptExecutor)_driver!;
             
             for (int i = 1; i <= 3; i++)
@@ -626,7 +1097,6 @@ public class AkakceScraper : IDisposable
             await RandomDelay(300, 500); // Reduced from 400-800ms
             
             var html = _driver.PageSource;
-            Console.WriteLine($"[Akakce] Page loaded. Title: {_driver.Title}");
             
             var htmlDoc = new HtmlDocument();
             htmlDoc.LoadHtml(html);
@@ -641,13 +1111,11 @@ public class AkakceScraper : IDisposable
                 
                 if (variantInfos.Count > 0)
                 {
-                    Console.WriteLine($"[Akakce] Found {variantInfos.Count} variant URLs to scrape");
                     await ScrapeAllVariants(product, variantInfos, jsExecutor);
                 }
                 else
                 {
                     // No variants detected - scrape as single product
-                    Console.WriteLine($"[Akakce] No variants detected, scraping as single product");
                     await ExtractSellersViaSelenium(product, html);
                 }
             }
@@ -660,22 +1128,18 @@ public class AkakceScraper : IDisposable
             if (product.HasVariants)
             {
                 var totalSellers = product.Variants.Sum(v => v.SellerCount);
-                Console.WriteLine($"[Akakce] ✅ SUCCESS: {product.Name} - {product.Variants.Count} variants, {totalSellers} total sellers");
             }
             else if (product.Sellers.Count > 0)
             {
-                Console.WriteLine($"[Akakce] ✅ SUCCESS: {product.Name} - {product.SellerCount} sellers");
             }
             else
             {
-                Console.WriteLine($"[Akakce] ⚠ No sellers found for: {product.Name}");
                 product.ErrorMessage = "No sellers extracted";
             }
         }
         catch (Exception ex)
         {
             product.ErrorMessage = ex.Message;
-            Console.WriteLine($"[Akakce] ERROR: {ex.Message}");
         }
 
         return product;
@@ -697,12 +1161,11 @@ public class AkakceScraper : IDisposable
         
         try
         {
-            Console.WriteLine("[Akakce] Detecting product variants...");
             
             // Extract variant URLs from the page
             // Variants are in: 
-            // - #PRV_v8 (Renk seçenekleri - Color options)
-            // - #PRG_v8 (Seçenekler - Storage/capacity options)
+            // - #PRV_v8 (Renk se�enekleri - Color options)
+            // - #PRG_v8 (Se�enekler - Storage/capacity options)
             var variantData = jsExecutor.ExecuteScript(@"
                 var variants = [];
                 
@@ -792,18 +1255,14 @@ public class AkakceScraper : IDisposable
                         });
                     }
                 }
-                
-                Console.WriteLine($"[Akakce] Detected {variants.Count} variant URLs:");
                 foreach (var v in variants)
                 {
                     var marker = v.IsCurrent ? " (current)" : "";
-                    Console.WriteLine($"[Akakce]   - [{v.Group}] {v.Name}{marker}");
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] Variant detection error: {ex.Message}");
         }
         
         await Task.CompletedTask;
@@ -839,17 +1298,14 @@ public class AkakceScraper : IDisposable
         {
             try
             {
-                Console.WriteLine($"[Akakce] Scraping variant {variantIndex}/{totalVariants}: {variantInfo.Name}");
                 
                 // If this is NOT the current page, navigate to the variant URL
                 if (!variantInfo.IsCurrent)
                 {
-                    Console.WriteLine($"[Akakce] Navigating to variant URL: {variantInfo.Url}");
                     
                     // Navigate with retry logic
                     if (!await NavigateWithRetry(variantInfo.Url, 2))
                     {
-                        Console.WriteLine($"[Akakce] ⚠ Failed to load variant page: {variantInfo.Name}");
                         variantIndex++;
                         continue;
                     }
@@ -894,26 +1350,20 @@ public class AkakceScraper : IDisposable
                 
                 product.Variants.Add(variant);
                 
-                Console.WriteLine($"[Akakce] ✓ Variant '{variantInfo.Name}': {variant.SellerCount} sellers, range: {variant.LowestPrice} - {variant.HighestPrice}");
-                
                 variantIndex++;
                 
                 // Add delay between variants to avoid triggering Cloudflare
                 if (!variantInfo.IsCurrent && variantIndex <= totalVariants)
                 {
                     var delay = _random.Next(3000, 5000);
-                    Console.WriteLine($"[Akakce] ⏳ Waiting {delay/1000}s before next variant...");
                     await Task.Delay(delay);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Akakce] ❌ Error scraping variant {variantIndex}: {ex.Message}");
                 variantIndex++;
             }
         }
-        
-        Console.WriteLine($"[Akakce] ✅ Completed scraping {product.Variants.Count} variants");
     }
 
     /// <summary>
@@ -939,7 +1389,7 @@ public class AkakceScraper : IDisposable
                 if (!title.Contains("Just a moment"))
                 {
                     if (title.Contains(" | ")) title = title.Split(" | ")[0].Trim();
-                    if (title.Contains(" Fiyatları")) title = title.Split(" Fiyatları")[0].Trim();
+                    if (title.Contains(" Fiyatlar�")) title = title.Split(" Fiyatlar�")[0].Trim();
                     product.Name = title;
                 }
             }
@@ -968,7 +1418,6 @@ public class AkakceScraper : IDisposable
             var jsExecutor = (IJavaScriptExecutor)_driver;
             
             // Method 1: Extract from JSON-LD structured data (most reliable)
-            Console.WriteLine("[Akakce] Extracting seller data from JSON-LD...");
             var jsonLdData = jsExecutor.ExecuteScript(@"
                 var results = [];
                 var scripts = document.querySelectorAll('script[type=""application/ld+json""]');
@@ -1014,7 +1463,6 @@ public class AkakceScraper : IDisposable
             if (jsonLdData != null && jsonLdData.ToString() != "[]" && jsonLdData.ToString() != "null")
             {
                 var count = CountJsonArray(jsonLdData.ToString()!);
-                Console.WriteLine($"[Akakce] Found {count} sellers in JSON-LD structured data");
                 ParseJsonLdPrices(jsonLdData.ToString()!, product);
                 
                 if (product.Sellers.Count > 0)
@@ -1025,7 +1473,6 @@ public class AkakceScraper : IDisposable
             }
             
             // Method 2: Try qvPrices JavaScript variable
-            Console.WriteLine("[Akakce] Trying qvPrices fallback...");
             var pricesJson = jsExecutor.ExecuteScript(@"
                 if (typeof window.qvPrices !== 'undefined' && Array.isArray(window.qvPrices) && window.qvPrices.length > 0) {
                     var mapped = window.qvPrices.map(function(p) {
@@ -1045,7 +1492,6 @@ public class AkakceScraper : IDisposable
             if (pricesJson != null && !string.IsNullOrEmpty(pricesJson.ToString()) && pricesJson.ToString() != "null")
             {
                 var count = CountJsonArray(pricesJson.ToString()!);
-                Console.WriteLine($"[Akakce] Found {count} sellers in qvPrices");
                 ParseQvPricesJson(pricesJson.ToString()!, product);
                 
                 if (product.Sellers.Count > 0)
@@ -1056,7 +1502,6 @@ public class AkakceScraper : IDisposable
             }
             
             // Method 3: DOM extraction fallback
-            Console.WriteLine("[Akakce] Trying DOM extraction fallback...");
             var domPrices = jsExecutor.ExecuteScript(@"
                 var results = [];
                 var sellerItems = document.querySelectorAll('#APL li, ul.pl_v8 > li, ul.pl_v9 > li, li.p_w');
@@ -1085,7 +1530,7 @@ public class AkakceScraper : IDisposable
                         if (elText.startsWith('/') && elText.length > 1 && elText.length < 60) {
                             var candidate = elText.substring(1).trim();
                             candidate = candidate.split('\n')[0].trim();
-                            candidate = candidate.split('Satıcıya')[0].trim();
+                            candidate = candidate.split('Sat�c�ya')[0].trim();
                             
                             if (candidate && candidate.length > 1 && candidate.length < 50 &&
                                 !candidate.match(/^[0-9]/) && !candidate.includes('TL')) {
@@ -1114,13 +1559,11 @@ public class AkakceScraper : IDisposable
             
             if (domPrices != null && domPrices.ToString() != "[]")
             {
-                Console.WriteLine($"[Akakce] DOM extraction found data");
                 ParseDomPricesJson(domPrices.ToString()!, product);
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] Extraction error: {ex.Message}");
         }
         
         await Task.CompletedTask;
@@ -1149,7 +1592,7 @@ public class AkakceScraper : IDisposable
                         if (text.startsWith('/') && text.length > 1 && text.length < 60) {
                             var candidate = text.substring(1).trim();
                             candidate = candidate.split('\n')[0].trim();
-                            candidate = candidate.split('Satıcıya')[0].trim();
+                            candidate = candidate.split('Sat�c�ya')[0].trim();
                             
                             if (candidate && candidate.length > 1 && candidate.length < 50 &&
                                 !candidate.match(/^[0-9]/) && !candidate.includes('TL')) {
@@ -1186,14 +1629,12 @@ public class AkakceScraper : IDisposable
                     }
                     if (enrichedCount > 0)
                     {
-                        Console.WriteLine($"[Akakce] Enriched {enrichedCount} seller names from DOM");
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] Enrichment error: {ex.Message}");
         }
         
         await Task.CompletedTask;
@@ -1272,7 +1713,6 @@ public class AkakceScraper : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] JSON-LD parse error: {ex.Message}");
         }
     }
 
@@ -1348,7 +1788,6 @@ public class AkakceScraper : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] qvPrices parse error: {ex.Message}");
         }
     }
 
@@ -1416,7 +1855,6 @@ public class AkakceScraper : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] DOM JSON parse error: {ex.Message}");
         }
     }
 
@@ -1429,19 +1867,18 @@ public class AkakceScraper : IDisposable
         
         try
         {
-            Console.WriteLine($"[Akakce] Loading category page: {categoryUrl}");
             InitializeDriver();
             
             if (onProgress != null)
             {
-                await onProgress(5, $"🔄 Loading category page...", "info");
+                await onProgress(5, $"?? Loading category page...", "info");
             }
             
             if (!await NavigateWithRetry(categoryUrl))
             {
                 if (onProgress != null)
                 {
-                    await onProgress(10, "❌ Page blocked by Cloudflare after retries", "error");
+                    await onProgress(10, "? Page blocked by Cloudflare after retries", "error");
                 }
                 return productUrls;
             }
@@ -1451,11 +1888,10 @@ public class AkakceScraper : IDisposable
             
             while (productUrls.Count < maxProducts && pageNumber <= maxPages)
             {
-                Console.WriteLine($"[Akakce] Processing page {pageNumber}...");
                 
                 if (onProgress != null)
                 {
-                    await onProgress(10, $"📄 Page {pageNumber}: Extracting URLs...", "info");
+                    await onProgress(10, $"?? Page {pageNumber}: Extracting URLs...", "info");
                 }
                 
                 var jsExecutor = (IJavaScriptExecutor)_driver!;
@@ -1526,8 +1962,6 @@ public class AkakceScraper : IDisposable
                     }
                 }
                 
-                Console.WriteLine($"[Akakce] Page {pageNumber}: Total URLs: {productUrls.Count}");
-                
                 if (productUrls.Count >= maxProducts)
                 {
                     break;
@@ -1558,16 +1992,13 @@ public class AkakceScraper : IDisposable
                 }
             }
             
-            Console.WriteLine($"[Akakce] ✓ Extracted {productUrls.Count} product URLs from {pageNumber} page(s)");
-            
             if (onProgress != null)
             {
-                await onProgress(15, $"✓ Found {productUrls.Count} product URLs", "success");
+                await onProgress(15, $"? Found {productUrls.Count} product URLs", "success");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Akakce] Error extracting URLs: {ex.Message}");
         }
         
         return productUrls;
@@ -1575,12 +2006,24 @@ public class AkakceScraper : IDisposable
 
     public void Dispose()
     {
-        if (_driver != null)
+        // Don't close the static driver - it's shared across instances
+        // The driver will be reused for subsequent searches
+    }
+    
+    /// <summary>
+    /// Force close the Edge driver (call when completely done with all scraping)
+    /// </summary>
+    public static void ForceCloseDriver()
+    {
+        lock (_driverLock)
         {
-            Console.WriteLine("[Akakce] Closing browser...");
-            try { _driver.Quit(); } catch { }
-            try { _driver.Dispose(); } catch { }
-            _driver = null;
+            if (_driver != null)
+            {
+                try { _driver.Quit(); } catch { }
+                try { _driver.Dispose(); } catch { }
+                _driver = null;
+            }
+            _initializationAttempted = false;
         }
     }
 }

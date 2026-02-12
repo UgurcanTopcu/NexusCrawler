@@ -1,4 +1,4 @@
-﻿using HtmlAgilityPack;
+using HtmlAgilityPack;
 using Scrapper.Models;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -63,17 +63,15 @@ public class HepsiburadaScraper : IDisposable
             
             // Check if this is a search URL (/ara)
             bool isSearchUrl = basePath.Contains("/ara");
-            
-            Console.WriteLine("\n[Hepsiburada] Starting product discovery...");
-            Console.WriteLine($"[Hepsiburada] URL Type: {(isSearchUrl ? "Search" : "Category")}");
-            Console.WriteLine($"[Hepsiburada] Target: {maxProducts} products");
-            Console.WriteLine($"[Hepsiburada] Base URL: {basePath}");
-            Console.WriteLine($"[Hepsiburada] Original Query: {originalQuery}");
+
+
+
+
             Console.Out.Flush();
             
             if (onProgress != null)
             {
-                await onProgress(5, $"🔍 Finding products (target: {maxProducts})...", "info");
+                await onProgress(5, $"?? Finding products (target: {maxProducts})...", "info");
             }
             
             int page = 1;
@@ -82,8 +80,6 @@ public class HepsiburadaScraper : IDisposable
             int maxPages = Math.Max(100, (maxProducts / productsPerPage) + 15);
             int consecutiveEmptyPages = 0;
             int consecutiveNoNewProducts = 0;
-            
-            Console.WriteLine($"[Hepsiburada] Max pages to check: {maxPages}");
             
             while (page <= maxPages && productLinks.Count < maxProducts)
             {
@@ -111,8 +107,6 @@ public class HepsiburadaScraper : IDisposable
                         paginatedUrl = $"{basePath}?{string.Join("&", queryParts)}";
                     }
                 }
-                
-                Console.WriteLine($"\n[Hepsiburada] Page {page}: {paginatedUrl}");
                 Console.Out.Flush();
                 
                 _driver!.Navigate().GoToUrl(paginatedUrl);
@@ -128,16 +122,15 @@ public class HepsiburadaScraper : IDisposable
                         d.FindElements(By.CssSelector("[class*='productCard']")).Count > 0 ||
                         d.FindElements(By.CssSelector("li[class*='product']")).Count > 0 ||
                         d.FindElements(By.CssSelector("a[href*='-p-']")).Count > 0 ||
+                        d.FindElements(By.CssSelector("a[href*='-pm-']")).Count > 0 ||
                         d.FindElements(By.CssSelector("a[href*='/p-']")).Count > 0
                     );
                 }
                 catch 
                 {
-                    Console.WriteLine($"[Hepsiburada] ⚠ No products found on page {page} (timeout)");
                     consecutiveEmptyPages++;
                     if (consecutiveEmptyPages >= 3)
                     {
-                        Console.WriteLine($"[Hepsiburada] ⛔ Reached end of results (3 consecutive empty pages)");
                         break;
                     }
                     page++;
@@ -148,7 +141,6 @@ public class HepsiburadaScraper : IDisposable
                 consecutiveEmptyPages = 0;
                 
                 // Aggressive scrolling to load all lazy-loaded products
-                Console.WriteLine($"[Hepsiburada] Scrolling to load all products...");
                 for (int i = 0; i < 15; i++)
                 {
                     ((IJavaScriptExecutor)_driver).ExecuteScript($"window.scrollTo(0, document.body.scrollHeight * {(i + 1) / 15.0});");
@@ -259,8 +251,8 @@ public class HepsiburadaScraper : IDisposable
                             return;
                         }
                         
-                        // Must contain -p- (product indicator)
-                        if (cleanHref.includes('-p-')) {
+                        // Must contain -p- or -pm- (product indicator)
+                        if (cleanHref.includes('-p-') || cleanHref.includes('-pm-')) {
                             seen[cleanHref] = true;
                             links.push(cleanHref);
                             stats.fromDirectLinks++;
@@ -277,8 +269,8 @@ public class HepsiburadaScraper : IDisposable
                     if (links.length < 30) {
                         console.log('[HB] Trying additional patterns...');
                         
-                        // Try /p- pattern
-                        document.querySelectorAll('a[href*=""/p-""]').forEach(function(link) {
+                        // Try /p- and -pm- patterns
+                        document.querySelectorAll('a[href*=""/p-""], a[href*=""-pm-""]').forEach(function(link) {
                             var href = link.href;
                             if (!href || !href.includes('hepsiburada.com')) return;
                             
@@ -292,7 +284,7 @@ public class HepsiburadaScraper : IDisposable
                         });
                         
                         // Try links ending with HB product codes
-                        document.querySelectorAll('a[href*=""hepsiburada.com""]').forEach(function(link) {
+                        document.querySelectorAll('a[href*=""hepsiburada.com""], a[href*=""-pm-""]').forEach(function(link) {
                             var href = link.href;
                             if (!href) return;
                             
@@ -360,7 +352,6 @@ public class HepsiburadaScraper : IDisposable
                             
                             rawLinksCount = linksList.Count;
                             var adInfo = fromAdRedirects > 0 ? $" (including {fromAdRedirects} from ads)" : "";
-                            Console.WriteLine($"[Hepsiburada] Page {page}: Found {rawLinksCount} unique product URLs{adInfo}");
                             
                             foreach (var url in linksList)
                             {
@@ -375,44 +366,37 @@ public class HepsiburadaScraper : IDisposable
                                     
                                     if (productLinks.Count <= 5)
                                     {
-                                        Console.WriteLine($"[Hepsiburada] #{productLinks.Count}: {cleanUrl}");
                                     }
                                 }
                             }
                             
                             if (newLinksOnPage != rawLinksCount)
                             {
-                                Console.WriteLine($"[Hepsiburada] Skipped {rawLinksCount - newLinksOnPage} duplicates from previous pages");
                             }
                         }
                     }
                     catch (Exception parseEx)
                     {
-                        Console.WriteLine($"[Hepsiburada] Error parsing response: {parseEx.Message}");
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"[Hepsiburada] ⚠ JavaScript returned no data!");
                 }
-                
-                Console.WriteLine($"[Hepsiburada] Page {page} Summary: New={newLinksOnPage}, Total={productLinks.Count}/{maxProducts}");
                 Console.Out.Flush();
                 
                 // Progress update
                 if (onProgress != null && productLinks.Count % 10 == 0)
                 {
                     var progressPercent = Math.Min(5 + (int)((productLinks.Count / (double)maxProducts) * 5), 10);
-                    await onProgress(progressPercent, $"🔍 Found {productLinks.Count}/{maxProducts} products (page {page})", "info");
+                    await onProgress(progressPercent, $"?? Found {productLinks.Count}/{maxProducts} products (page {page})", "info");
                 }
                 
                 // Check if we reached target
                 if (productLinks.Count >= maxProducts)
                 {
-                    Console.WriteLine($"[Hepsiburada] ✓ Target reached!");
                     if (onProgress != null)
                     {
-                        await onProgress(10, $"✓ Found all {productLinks.Count} product URLs!", "success");
+                        await onProgress(10, $"? Found all {productLinks.Count} product URLs!", "success");
                     }
                     break;
                 }
@@ -421,14 +405,12 @@ public class HepsiburadaScraper : IDisposable
                 if (newLinksOnPage == 0)
                 {
                     consecutiveNoNewProducts++;
-                    Console.WriteLine($"[Hepsiburada] ⚠ Page {page} had no new products ({consecutiveNoNewProducts} consecutive)");
                     
                     if (consecutiveNoNewProducts >= 3)
                     {
-                        Console.WriteLine($"[Hepsiburada] ⛔ End of unique products");
                         if (onProgress != null && productLinks.Count > 0)
                         {
-                            await onProgress(10, $"✓ Found {productLinks.Count} products (all available)", "success");
+                            await onProgress(10, $"? Found {productLinks.Count} products (all available)", "success");
                         }
                         break;
                     }
@@ -444,7 +426,6 @@ public class HepsiburadaScraper : IDisposable
                     consecutiveEmptyPages++;
                     if (consecutiveEmptyPages >= 2)
                     {
-                        Console.WriteLine($"[Hepsiburada] ⛔ End of results (empty pages)");
                         break;
                     }
                 }
@@ -452,26 +433,21 @@ public class HepsiburadaScraper : IDisposable
                 page++;
                 await Task.Delay(800); // Delay between pages
             }
-            
-            Console.WriteLine($"\n[Hepsiburada] ✓ Total: {productLinks.Count} products from {page - 1} pages\n");
             Console.Out.Flush();
             
             if (productLinks.Count > 0)
             {
-                Console.WriteLine("Sample product links:");
                 foreach (var link in productLinks.Take(5))
                 {
-                    Console.WriteLine($"  - {link}");
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error fetching product links: {ex.Message}");
-            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+
             if (onProgress != null)
             {
-                await onProgress(10, $"❌ Error finding products: {ex.Message}", "error");
+                await onProgress(10, $"? Error finding products: {ex.Message}", "error");
             }
         }
 
@@ -505,11 +481,9 @@ public class HepsiburadaScraper : IDisposable
                     {
                         // Wait for redirect to complete - URL should change to actual product page
                         redirectWait.Until(d => !d.Url.Contains("adservice.hepsiburada.com"));
-                        Console.WriteLine($"[Hepsiburada] Ad redirect completed to: {_driver.Url}");
                     }
                     catch
                     {
-                        Console.WriteLine($"[Hepsiburada] Warning: Ad redirect timeout, continuing with current page");
                     }
                     
                     // Update productUrl to the actual product URL after redirect
@@ -547,6 +521,59 @@ public class HepsiburadaScraper : IDisposable
                 }
             }
             catch { }
+            
+            // EXTRACT CATEGORY HIERARCHY from utagData script
+            // This is critical for grouping products by category in Excel export
+            try
+            {
+                var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'utagData')]");
+                if (scriptNodes != null)
+                {
+                    foreach (var scriptNode in scriptNodes)
+                    {
+                        var scriptText = scriptNode.InnerText;
+                        
+                        // Extract category_id_hierarchy: "2147483637 > 235604 > 234329"
+                        var categoryIdMatch = Regex.Match(scriptText, @"""category_id_hierarchy""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                        if (categoryIdMatch.Success)
+                        {
+                            product.CategoryIdHierarchy = categoryIdMatch.Groups[1].Value.Trim();
+                        }
+                        
+                        // Extract category_name_hierarchy: "Beyaz Esya / Mutfak > Beyaz Esya & Ankastre > Ankastre Setler"
+                        var categoryNameMatch = Regex.Match(scriptText, @"""category_name_hierarchy""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                        if (categoryNameMatch.Success)
+                        {
+                            product.CategoryNameHierarchy = categoryNameMatch.Groups[1].Value.Trim();
+                        }
+                        
+                        // Also try to extract barcode from utagData if not found elsewhere
+                        if (string.IsNullOrEmpty(product.Barcode))
+                        {
+                            var barcodeMatch = Regex.Match(scriptText, @"""product_barcode""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                            if (barcodeMatch.Success && !string.IsNullOrWhiteSpace(barcodeMatch.Groups[1].Value))
+                            {
+                                product.Barcode = barcodeMatch.Groups[1].Value.Trim();
+                            }
+                        }
+                        
+                        // Extract brand from utagData if not found
+                        if (string.IsNullOrEmpty(product.Brand))
+                        {
+                            var brandMatch = Regex.Match(scriptText, @"""product_brand""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                            if (brandMatch.Success)
+                            {
+                                product.Brand = brandMatch.Groups[1].Value.Trim();
+                            }
+                        }
+                        
+                        break; // Found utagData script, no need to continue
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+            }
             
             // EXTRACT PRODUCT NAME
             try
@@ -828,7 +855,6 @@ public class HepsiburadaScraper : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error scraping product: {ex.Message}");
         }
 
         return null;
@@ -838,7 +864,6 @@ public class HepsiburadaScraper : IDisposable
     {
         try
         {
-            Console.WriteLine($"[Hepsiburada] Extracting attributes for: {product.Name}");
             
             // Method 1: JavaScript extraction for Selenium (most reliable for dynamic content)
             if (Method == ScrapeMethod.Selenium && _driver != null)
@@ -882,8 +907,8 @@ public class HepsiburadaScraper : IDisposable
                             
                             var key = keyDiv.textContent.trim();
                             
-                            // Stop if we hit 'Hatalı içerik bildir'
-                            if (key.includes('Hatalı') || key.includes('içerik') || key.includes('bildir')) {
+                            // Stop if we hit 'Hatal� i�erik bildir'
+                            if (key.includes('Hatal�') || key.includes('i�erik') || key.includes('bildir')) {
                                 console.log('[Hepsiburada JS] Reached end marker at index ' + i);
                                 break;
                             }
@@ -920,7 +945,7 @@ public class HepsiburadaScraper : IDisposable
                                     var key2 = hasKey.textContent.trim();
                                     
                                     // Stop at end marker
-                                    if (key2.includes('Hatalı') || key2.includes('içerik') || key2.includes('bildir')) {
+                                    if (key2.includes('Hatal�') || key2.includes('i�erik') || key2.includes('bildir')) {
                                         console.log('[Hepsiburada JS] Method 2: Reached end marker');
                                         break;
                                     }
@@ -959,11 +984,10 @@ public class HepsiburadaScraper : IDisposable
                                     value = Regex.Replace(value, @"\s+", " ").Trim();
                                     
                                     // Skip if it's the end marker
-                                    if (key.Contains("Hatalı", StringComparison.OrdinalIgnoreCase) ||
-                                        key.Contains("içerik", StringComparison.OrdinalIgnoreCase) ||
+                                    if (key.Contains("Hatal�", StringComparison.OrdinalIgnoreCase) ||
+                                        key.Contains("i�erik", StringComparison.OrdinalIgnoreCase) ||
                                         key.Contains("bildir", StringComparison.OrdinalIgnoreCase))
                                     {
-                                        Console.WriteLine($"[Hepsiburada] Skipping end marker: {key}");
                                         break;
                                     }
                                     
@@ -971,12 +995,10 @@ public class HepsiburadaScraper : IDisposable
                                     {
                                         product.Attributes[key] = value;
                                         jsCount++;
-                                        Console.WriteLine($"[Hepsiburada] Added attribute: {key} = {value}");
                                     }
                                 }
                             }
                         }
-                        Console.WriteLine($"[Hepsiburada] JS extracted {jsCount} attributes");
                     }
                     
                     // Get updated HTML after lazy loading
@@ -986,21 +1008,18 @@ public class HepsiburadaScraper : IDisposable
                 }
                 catch (Exception jsEx)
                 {
-                    Console.WriteLine($"[Hepsiburada] JS attribute extraction warning: {jsEx.Message}");
                 }
             }
             
             // Method 2: HTML parsing with specific Hepsiburada classes
             if (product.Attributes.Count == 0)
             {
-                Console.WriteLine("[Hepsiburada] Trying HTML parsing with specific classes...");
                 
                 // Try with partial class matching using contains
                 var attributeContainers = htmlDoc.DocumentNode.SelectNodes("//div[contains(@class, 'jkj4C4LML4qv2Iq8GkL3')]");
                 
                 if (attributeContainers != null && attributeContainers.Count > 0)
                 {
-                    Console.WriteLine($"[Hepsiburada] Found {attributeContainers.Count} containers in HTML");
                     int htmlCount = 0;
                     foreach (var container in attributeContainers)
                     {
@@ -1013,11 +1032,10 @@ public class HepsiburadaScraper : IDisposable
                             var key = Regex.Replace(keyDiv.InnerText.Trim(), @"\s+", " ");
                             
                             // Stop at end marker
-                            if (key.Contains("Hatalı", StringComparison.OrdinalIgnoreCase) ||
-                                key.Contains("içerik", StringComparison.OrdinalIgnoreCase) ||
+                            if (key.Contains("Hatal�", StringComparison.OrdinalIgnoreCase) ||
+                                key.Contains("i�erik", StringComparison.OrdinalIgnoreCase) ||
                                 key.Contains("bildir", StringComparison.OrdinalIgnoreCase))
                             {
-                                Console.WriteLine($"[Hepsiburada] HTML: Reached end marker, stopping");
                                 break;
                             }
                             
@@ -1035,23 +1053,19 @@ public class HepsiburadaScraper : IDisposable
                             {
                                 product.Attributes[key] = value;
                                 htmlCount++;
-                                Console.WriteLine($"[Hepsiburada] HTML added: {key} = {value}");
                             }
                         }
                         catch { }
                     }
-                    Console.WriteLine($"[Hepsiburada] HTML parsing extracted {htmlCount} attributes");
                 }
                 else
                 {
-                    Console.WriteLine("[Hepsiburada] No attribute containers found in HTML");
                 }
             }
             
             // Method 3: Fallback to table parsing (old structure)
             if (product.Attributes.Count == 0)
             {
-                Console.WriteLine("[Hepsiburada] Trying table parsing (fallback)...");
                 var attributeRows = htmlDoc.DocumentNode.SelectNodes("//table//tr[.//td[2]]");
                 
                 if (attributeRows != null && attributeRows.Count > 0)
@@ -1076,14 +1090,12 @@ public class HepsiburadaScraper : IDisposable
                         }
                         catch { }
                     }
-                    Console.WriteLine($"[Hepsiburada] Table extracted {tableCount} attributes");
                 }
             }
             
             // Method 4: Parse definition lists (another fallback)
             if (product.Attributes.Count == 0)
             {
-                Console.WriteLine("[Hepsiburada] Trying definition list parsing (fallback)...");
                 var dtElements = htmlDoc.DocumentNode.SelectNodes("//dt");
                 if (dtElements != null)
                 {
@@ -1110,23 +1122,17 @@ public class HepsiburadaScraper : IDisposable
                         }
                         catch { }
                     }
-                    Console.WriteLine($"[Hepsiburada] Definition list extracted {dtCount} attributes");
                 }
             }
-            
-            Console.WriteLine($"[Hepsiburada] Total attributes extracted: {product.Attributes.Count}");
             if (product.Attributes.Count > 0)
             {
-                Console.WriteLine($"[Hepsiburada] Sample attributes: {string.Join(", ", product.Attributes.Keys.Take(5))}");
             }
             else
             {
-                Console.WriteLine($"[Hepsiburada] ? WARNING: No attributes found for product!");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Hepsiburada] Attribute extraction error: {ex.Message}");
         }
         
         await Task.CompletedTask;
@@ -1183,7 +1189,6 @@ public class HepsiburadaScraper : IDisposable
         var productLinks = await GetProductLinksAsync(categoryUrl, maxProducts);
         
         var linksToProcess = productLinks.Take(maxProducts).ToList();
-        Console.WriteLine($"\nProcessing {linksToProcess.Count} products...\n");
 
         foreach (var link in linksToProcess)
         {
