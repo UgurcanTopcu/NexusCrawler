@@ -1,5 +1,6 @@
 using Scrapper.Models;
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 
 namespace Scrapper.Services;
 
@@ -151,7 +152,8 @@ public class HepsiburadaScraperService
                 await onProgress(finalProgress, $"Scraped {products.Count} products{stoppedText}{skippedText}. Creating Excel...", "info");
                 
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                var fileName = $"HepsiburadaProducts_{timestamp}.xlsx";
+                var urlName = ExtractNameFromUrl(categoryUrl);
+                var fileName = $"Hepsiburada_{urlName}_{timestamp}.xlsx";
                 var filePath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
                 
                 try
@@ -189,7 +191,8 @@ public class HepsiburadaScraperService
                 try
                 {
                     var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-                    var fileName = $"HepsiburadaProducts_Partial_{timestamp}.xlsx";
+                    var urlName = ExtractNameFromUrl(categoryUrl);
+                    var fileName = $"Hepsiburada_{urlName}_Partial_{timestamp}.xlsx";
                     var filePath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
                     var exporter = new ExcelExporter();
                     exporter.ExportToExcel(products, filePath, excludePrice, processImages);
@@ -232,5 +235,101 @@ public class HepsiburadaScraperService
         
         var json = System.Text.Json.JsonSerializer.Serialize(data);
         await onProgress(100, json, "complete");
+    }
+    
+    /// <summary>
+    /// Extracts a meaningful name from Hepsiburada URLs for file naming.
+    /// Shop URL: https://www.hepsiburada.com/magaza/avfoni?tab=allproducts -> "avfoni"
+    /// Category URL: https://www.hepsiburada.com/elektrikli-ev-aletleri-ankastre-setler-c-234329 -> "ankastre-setler"
+    /// Search URL: https://www.hepsiburada.com/ara?q=laptop -> "laptop"
+    /// </summary>
+    private string ExtractNameFromUrl(string url)
+    {
+        try
+        {
+            var uri = new Uri(url.StartsWith("http") ? url : "https://" + url);
+            var path = uri.AbsolutePath.Trim('/');
+            var query = uri.Query;
+            
+            // Shop URL: /magaza/shopname
+            if (path.StartsWith("magaza/", StringComparison.OrdinalIgnoreCase))
+            {
+                var shopName = path.Substring(7).Split('?')[0].Split('/')[0];
+                return SanitizeFileName(shopName);
+            }
+            
+            // Search URL: /ara?q=searchterm
+            if (path.StartsWith("ara", StringComparison.OrdinalIgnoreCase) && query.Contains("q="))
+            {
+                var queryParams = System.Web.HttpUtility.ParseQueryString(query);
+                var searchTerm = queryParams.Get("q");
+                if (!string.IsNullOrEmpty(searchTerm))
+                {
+                    return SanitizeFileName(searchTerm);
+                }
+            }
+            
+            // Category URL: /some-category-name-c-123456 or /some-category-name
+            // Extract the meaningful part before "-c-" or just the last segment
+            var segments = path.Split('/');
+            var lastSegment = segments[segments.Length - 1];
+            
+            // Remove category ID suffix if present (e.g., "-c-234329")
+            var categoryMatch = Regex.Match(lastSegment, @"^(.+?)-c-\d+$");
+            if (categoryMatch.Success)
+            {
+                return SanitizeFileName(categoryMatch.Groups[1].Value);
+            }
+            
+            // Return the last segment as-is (cleaned)
+            return SanitizeFileName(lastSegment);
+        }
+        catch
+        {
+            return "Products";
+        }
+    }
+    
+    /// <summary>
+    /// Sanitizes a string to be safe for use as a filename.
+    /// Removes invalid characters, limits length, and ensures readable format.
+    /// </summary>
+    private string SanitizeFileName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return "Products";
+        
+        // Replace URL encoding and special chars with readable text
+        name = System.Web.HttpUtility.UrlDecode(name);
+        
+        // Replace Turkish characters with ASCII equivalents for compatibility
+        name = name.Replace('ý', 'i')
+                   .Replace('ð', 'g')
+                   .Replace('ü', 'u')
+                   .Replace('þ', 's')
+                   .Replace('ö', 'o')
+                   .Replace('ç', 'c')
+                   .Replace('Ý', 'I')
+                   .Replace('Ð', 'G')
+                   .Replace('Ü', 'U')
+                   .Replace('Þ', 'S')
+                   .Replace('Ö', 'O')
+                   .Replace('Ç', 'C');
+        
+        // Keep only alphanumeric, dash, and underscore
+        name = Regex.Replace(name, @"[^a-zA-Z0-9-_]", "-");
+        
+        // Remove consecutive dashes
+        name = Regex.Replace(name, @"-+", "-");
+        
+        // Trim dashes from start and end
+        name = name.Trim('-');
+        
+        // Limit length to 50 characters
+        if (name.Length > 50)
+            name = name.Substring(0, 50).TrimEnd('-');
+        
+        // Ensure not empty after sanitization
+        return string.IsNullOrWhiteSpace(name) ? "Products" : name;
     }
 }

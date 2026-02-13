@@ -82,7 +82,7 @@ public class HepsiburadaBarcodeSearchService
                     BarcodeSearchResult result;
                     try
                     {
-                        result = await SearchBarcodeAsync(barcode);
+                        result = await SearchBarcodeAsync(barcode, cts.Token);
                     }
                     catch (Exception ex)
                     {
@@ -181,10 +181,10 @@ public class HepsiburadaBarcodeSearchService
         }
     }
 
-    private async Task<BarcodeSearchResult> SearchBarcodeAsync(string barcode)
+    private async Task<BarcodeSearchResult> SearchBarcodeAsync(string barcode, CancellationToken cancellationToken = default)
     {
         var searchUrl = $"https://www.hepsiburada.com/ara?q={barcode}";
-        var html = await GetPageHtmlAsync(searchUrl);
+        var html = await GetPageHtmlAsync(searchUrl, cancellationToken);
 
         var result = new BarcodeSearchResult
         {
@@ -388,14 +388,14 @@ public class HepsiburadaBarcodeSearchService
         }
     }
 
-    private async Task<string> GetPageHtmlAsync(string url)
+    private async Task<string> GetPageHtmlAsync(string url, CancellationToken cancellationToken = default)
     {
         var encodedUrl = System.Net.WebUtility.UrlEncode(url);
         var apiUrl = $"{_config.BaseUrl}?url={encodedUrl}&token={_config.ApiToken}";
 
-        var response = await _httpClient.GetAsync(apiUrl);
+        var response = await _httpClient.GetAsync(apiUrl, cancellationToken);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStringAsync();
+        return await response.Content.ReadAsStringAsync(cancellationToken);
     }
 
     private List<string> ReadBarcodesFromExcel(Stream excelStream)
@@ -428,7 +428,8 @@ public class HepsiburadaBarcodeSearchService
                     {
                         var cleanBarcode = barcode.Trim().Replace(" ", "").Replace("-", "");
                         
-                        if (!string.IsNullOrWhiteSpace(cleanBarcode))
+                        // Skip barcodes with less than 10 characters (invalid/incomplete barcodes)
+                        if (!string.IsNullOrWhiteSpace(cleanBarcode) && cleanBarcode.Length >= 10)
                             barcodes.Add(cleanBarcode);
                     }
                 }
