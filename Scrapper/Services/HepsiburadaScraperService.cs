@@ -53,25 +53,13 @@ public class HepsiburadaScraperService
             var progressPerProduct = 80.0 / linksToProcess.Count;
             var currentProgress = 10.0;
 
-            // Initialize image services ONCE if needed
-            FtpUploadService? ftpService = null;
-            HttpClient? httpClient = null;
-            ImageProcessingService? imageService = null;
-            CdnCacheService? cdnCache = null;
+            // Initialize image service if needed (wsrv.nl - no upload, just URL transformation)
+            WsrvImageService? imageService = null;
 
             if (processImages)
             {
-                var ftpConfig = new CdnFtpConfig();
-                ftpService = new FtpUploadService(ftpConfig);
-                httpClient = new HttpClient();
-                cdnCache = new CdnCacheService(ftpConfig);
-                imageService = new ImageProcessingService(httpClient, ftpService, cdnCache);
-
-                await onProgress(8, "Loading CDN cache...", "info");
-                await imageService.InitializeCacheAsync();
-
-                var (siteCount, productCount) = cdnCache.GetCacheStats();
-                await onProgress(9, $"CDN cache ready: {productCount} products", "info");
+                imageService = new WsrvImageService();
+                await onProgress(9, "Image CDN ready (wsrv.nl)", "info");
             }
 
             // Process each product
@@ -109,7 +97,7 @@ public class HepsiburadaScraperService
 
                     await onProgress((int)currentProgress, $"Scraped: {displayNameSuccess}", "success");
 
-                    // Process images
+                    // Process images with wsrv.nl
                     if (processImages && imageService != null && !cts.Token.IsCancellationRequested)
                     {
                         try
@@ -124,7 +112,7 @@ public class HepsiburadaScraperService
                             product.CdnAdditionalImages = additionalImages;
 
                             var imageCount = (string.IsNullOrEmpty(mainImage) ? 0 : 1) + additionalImages.Count;
-                            await onProgress((int)currentProgress, $"Uploaded {imageCount} images", "success");
+                            await onProgress((int)currentProgress, $"Converted {imageCount} images to wsrv.nl URLs", "success");
                         }
                         catch (Exception imgEx)
                         {
@@ -139,8 +127,7 @@ public class HepsiburadaScraperService
                 await Task.Delay(200);
             }
 
-            // Cleanup
-            httpClient?.Dispose();
+            // No cleanup needed for wsrv.nl (it's stateless)
 
             // Always create Excel if we have products (even if stopped early)
             if (products.Count > 0)

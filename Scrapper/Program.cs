@@ -5,19 +5,11 @@ using Scrapper.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddSingleton<CdnFtpConfig>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<HttpClient>();
 
-builder.Services.AddSingleton<CdnCacheService>();
-builder.Services.AddSingleton<FtpUploadService>();
-builder.Services.AddSingleton<ImageProcessingService>(sp =>
-{
-    var httpClient = new HttpClient();
-    var ftpService = sp.GetRequiredService<FtpUploadService>();
-    var cdnCache = sp.GetRequiredService<CdnCacheService>();
-    return new ImageProcessingService(httpClient, ftpService, cdnCache);
-});
+// New wsrv.nl image service (replaces FTP-based CDN)
+builder.Services.AddSingleton<WsrvImageService>();
 
 builder.Services.AddSingleton<TrendyolScraperService>();
 builder.Services.AddSingleton<HepsiburadaScraperService>();
