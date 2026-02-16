@@ -385,10 +385,16 @@ app.MapGet("/hepsiburada-barcode", async (IWebHostEnvironment env) =>
     return Results.Content(content, "text/html; charset=utf-8");
 });
 
-app.MapGet("/bulk-image", async (IWebHostEnvironment env) =>
+app.MapGet("/bulk-image", async (IWebHostEnvironment env, HttpContext context) =>
 {
     var filePath = Path.Combine(env.WebRootPath, "pages", "bulk-image.html");
     var content = await File.ReadAllTextAsync(filePath);
+    
+    // Add cache-busting headers
+    context.Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+    context.Response.Headers["Pragma"] = "no-cache";
+    context.Response.Headers["Expires"] = "0";
+    
     return Results.Content(content, "text/html; charset=utf-8");
 });
 

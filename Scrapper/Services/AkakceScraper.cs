@@ -1417,6 +1417,84 @@ public class AkakceScraper : IDisposable
         {
             var jsExecutor = (IJavaScriptExecutor)_driver;
             
+            // FIRST: Click "Show more prices" button if it exists
+            try
+            {
+                // Count sellers BEFORE clicking
+                var sellerCountBefore = jsExecutor.ExecuteScript(@"
+                    return document.querySelectorAll('#APL li, ul.pl_v8 > li, ul.pl_v9 > li, li.p_w').length;
+                ");
+                var countBefore = Convert.ToInt32(sellerCountBefore ?? 0);
+                Console.WriteLine($"[AkakceScraper] Sellers visible before click: {countBefore}");
+                
+                // Try to find and click the "Daha fazla fiyat gör" button
+                var showMoreButton = _driver.FindElements(By.Id("SAP"));
+                if (showMoreButton.Count > 0 && showMoreButton[0].Displayed)
+                {
+                    Console.WriteLine("[AkakceScraper] Found 'Show more prices' button, clicking...");
+                    
+                    // Scroll to the button to make sure it's in view
+                    jsExecutor.ExecuteScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", showMoreButton[0]);
+                    await Task.Delay(500);
+                    
+                    // Click the button via JavaScript (more reliable than .Click())
+                    jsExecutor.ExecuteScript("arguments[0].click();", showMoreButton[0]);
+                    Console.WriteLine("[AkakceScraper] Clicked 'Show more prices' button");
+                    
+                    // Wait for new sellers to appear (with timeout)
+                    bool newSellersLoaded = false;
+                    var startTime = DateTime.Now;
+                    var timeout = TimeSpan.FromSeconds(10);
+                    
+                    while ((DateTime.Now - startTime) < timeout)
+                    {
+                        await Task.Delay(500);
+                        
+                        // Check current seller count
+                        var currentCount = jsExecutor.ExecuteScript(@"
+                            return document.querySelectorAll('#APL li, ul.pl_v8 > li, ul.pl_v9 > li, li.p_w').length;
+                        ");
+                        var countNow = Convert.ToInt32(currentCount ?? 0);
+                        
+                        // If we have more sellers than before, the AJAX loaded
+                        if (countNow > countBefore)
+                        {
+                            Console.WriteLine($"[AkakceScraper] Additional sellers loaded! Total now: {countNow} (was {countBefore})");
+                            newSellersLoaded = true;
+                            
+                            // Wait a bit more to ensure all are rendered
+                            await Task.Delay(1000);
+                            
+                            // Scroll down to ensure all are visible
+                            jsExecutor.ExecuteScript("window.scrollBy(0, 500);");
+                            await Task.Delay(500);
+                            
+                            break;
+                        }
+                    }
+                    
+                    if (!newSellersLoaded)
+                    {
+                        Console.WriteLine("[AkakceScraper] No new sellers appeared after clicking (timeout or no more sellers)");
+                    }
+                    
+                    // Final count
+                    var finalCount = jsExecutor.ExecuteScript(@"
+                        return document.querySelectorAll('#APL li, ul.pl_v8 > li, ul.pl_v9 > li, li.p_w').length;
+                    ");
+                    Console.WriteLine($"[AkakceScraper] Final seller count in DOM: {finalCount}");
+                }
+                else
+                {
+                    Console.WriteLine("[AkakceScraper] No 'Show more prices' button found or not displayed");
+                }
+            }
+            catch (Exception btnEx)
+            {
+                // If button click fails, just continue - we'll get whatever prices are already visible
+                Console.WriteLine($"[AkakceScraper] Could not click 'Show more' button: {btnEx.Message}");
+            }
+            
             // Method 1: Extract from JSON-LD structured data (most reliable)
             var jsonLdData = jsExecutor.ExecuteScript(@"
                 var results = [];
