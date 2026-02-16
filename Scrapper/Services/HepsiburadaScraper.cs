@@ -1,4 +1,4 @@
-using HtmlAgilityPack;
+ï»¿using HtmlAgilityPack;
 using Scrapper.Models;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -37,7 +37,7 @@ public class HepsiburadaScraper : IDisposable
             options.AddArgument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
             options.AddExcludedArgument("enable-automation");
             options.AddAdditionalOption("useAutomationExtension", false);
-            
+
             _driver = new ChromeDriver(options);
             ((IJavaScriptExecutor)_driver).ExecuteScript("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})");
         }
@@ -55,12 +55,12 @@ public class HepsiburadaScraper : IDisposable
         try
         {
             InitializeDriver();
-            
+
             // Parse URL - preserve the original query string to avoid encoding issues
             var uri = new Uri(categoryUrl.StartsWith("http") ? categoryUrl : "https://" + categoryUrl);
             var basePath = uri.GetLeftPart(UriPartial.Path);
             var originalQuery = uri.Query; // Keep original query string as-is
-            
+
             // Check if this is a search URL (/ara)
             bool isSearchUrl = basePath.Contains("/ara");
 
@@ -68,24 +68,24 @@ public class HepsiburadaScraper : IDisposable
 
 
             Console.Out.Flush();
-            
+
             if (onProgress != null)
             {
                 await onProgress(5, $"?? Finding products (target: {maxProducts})...", "info");
             }
-            
+
             int page = 1;
             // Hepsiburada shows ~36 products per page, support up to 2000 products
             int productsPerPage = 36;
             int maxPages = Math.Max(100, (maxProducts / productsPerPage) + 15);
             int consecutiveEmptyPages = 0;
             int consecutiveNoNewProducts = 0;
-            
+
             while (page <= maxPages && productLinks.Count < maxProducts)
             {
                 // Build paginated URL - Hepsiburada uses "sayfa" parameter
                 string paginatedUrl;
-                
+
                 if (page == 1)
                 {
                     paginatedUrl = categoryUrl.StartsWith("http") ? categoryUrl : "https://" + categoryUrl;
@@ -108,16 +108,16 @@ public class HepsiburadaScraper : IDisposable
                     }
                 }
                 Console.Out.Flush();
-                
+
                 _driver!.Navigate().GoToUrl(paginatedUrl);
-                
+
                 // Wait for page to load - look for product cards OR any content
                 var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(20));
-                
+
                 try
                 {
                     // Wait for product content to load - multiple possible selectors
-                    wait.Until(d => 
+                    wait.Until(d =>
                         d.FindElements(By.CssSelector("[data-test-id='product-card-item']")).Count > 0 ||
                         d.FindElements(By.CssSelector("[class*='productCard']")).Count > 0 ||
                         d.FindElements(By.CssSelector("li[class*='product']")).Count > 0 ||
@@ -126,7 +126,7 @@ public class HepsiburadaScraper : IDisposable
                         d.FindElements(By.CssSelector("a[href*='/p-']")).Count > 0
                     );
                 }
-                catch 
+                catch
                 {
                     consecutiveEmptyPages++;
                     if (consecutiveEmptyPages >= 3)
@@ -137,16 +137,16 @@ public class HepsiburadaScraper : IDisposable
                     await Task.Delay(1000);
                     continue;
                 }
-                
+
                 consecutiveEmptyPages = 0;
-                
+
                 // Aggressive scrolling to load all lazy-loaded products
                 for (int i = 0; i < 15; i++)
                 {
                     ((IJavaScriptExecutor)_driver).ExecuteScript($"window.scrollTo(0, document.body.scrollHeight * {(i + 1) / 15.0});");
                     await Task.Delay(300);
                 }
-                
+
                 // Scroll back to top and down again
                 ((IJavaScriptExecutor)_driver).ExecuteScript("window.scrollTo(0, 0);");
                 await Task.Delay(500);
@@ -318,18 +318,18 @@ public class HepsiburadaScraper : IDisposable
                         stats: stats
                     });
                 ");
-                
+
                 int newLinksOnPage = 0;
                 int rawLinksCount = 0;
                 int productCardsFound = 0;
                 int fromAdRedirects = 0;
-                
+
                 if (productUrls != null && !string.IsNullOrWhiteSpace(productUrls.ToString()))
                 {
                     try
                     {
                         using var doc = JsonDocument.Parse(productUrls.ToString()!);
-                        
+
                         // Extract stats
                         if (doc.RootElement.TryGetProperty("stats", out var statsElem))
                         {
@@ -338,7 +338,7 @@ public class HepsiburadaScraper : IDisposable
                             if (statsElem.TryGetProperty("fromAdRedirects", out var adRedirectsElem))
                                 fromAdRedirects = adRedirectsElem.GetInt32();
                         }
-                        
+
                         // Extract links
                         if (doc.RootElement.TryGetProperty("links", out var linksElem))
                         {
@@ -349,27 +349,27 @@ public class HepsiburadaScraper : IDisposable
                                 if (!string.IsNullOrEmpty(link))
                                     linksList.Add(link);
                             }
-                            
+
                             rawLinksCount = linksList.Count;
                             var adInfo = fromAdRedirects > 0 ? $" (including {fromAdRedirects} from ads)" : "";
-                            
+
                             foreach (var url in linksList)
                             {
                                 if (productLinks.Count >= maxProducts) break;
-                                
+
                                 var cleanUrl = url.Trim();
-                                
+
                                 if (!productLinks.Contains(cleanUrl))
                                 {
                                     productLinks.Add(cleanUrl);
                                     newLinksOnPage++;
-                                    
+
                                     if (productLinks.Count <= 5)
                                     {
                                     }
                                 }
                             }
-                            
+
                             if (newLinksOnPage != rawLinksCount)
                             {
                             }
@@ -383,14 +383,14 @@ public class HepsiburadaScraper : IDisposable
                 {
                 }
                 Console.Out.Flush();
-                
+
                 // Progress update
                 if (onProgress != null && productLinks.Count % 10 == 0)
                 {
                     var progressPercent = Math.Min(5 + (int)((productLinks.Count / (double)maxProducts) * 5), 10);
                     await onProgress(progressPercent, $"?? Found {productLinks.Count}/{maxProducts} products (page {page})", "info");
                 }
-                
+
                 // Check if we reached target
                 if (productLinks.Count >= maxProducts)
                 {
@@ -400,12 +400,12 @@ public class HepsiburadaScraper : IDisposable
                     }
                     break;
                 }
-                
+
                 // Check for pages with no new products
                 if (newLinksOnPage == 0)
                 {
                     consecutiveNoNewProducts++;
-                    
+
                     if (consecutiveNoNewProducts >= 3)
                     {
                         if (onProgress != null && productLinks.Count > 0)
@@ -419,7 +419,7 @@ public class HepsiburadaScraper : IDisposable
                 {
                     consecutiveNoNewProducts = 0;
                 }
-                
+
                 // Check if page had no products at all
                 if (rawLinksCount == 0)
                 {
@@ -429,12 +429,12 @@ public class HepsiburadaScraper : IDisposable
                         break;
                     }
                 }
-                
+
                 page++;
                 await Task.Delay(800); // Delay between pages
             }
             Console.Out.Flush();
-            
+
             if (productLinks.Count > 0)
             {
                 foreach (var link in productLinks.Take(5))
@@ -472,7 +472,7 @@ public class HepsiburadaScraper : IDisposable
             {
                 InitializeDriver();
                 _driver!.Navigate().GoToUrl(productUrl);
-                
+
                 // If this was an adservice URL, wait for redirect
                 if (productUrl.Contains("adservice.hepsiburada.com"))
                 {
@@ -485,19 +485,19 @@ public class HepsiburadaScraper : IDisposable
                     catch
                     {
                     }
-                    
+
                     // Update productUrl to the actual product URL after redirect
                     productUrl = _driver.Url.Split('?')[0].Split('#')[0];
                 }
-                
+
                 var wait = new WebDriverWait(_driver, TimeSpan.FromSeconds(8));
-                
+
                 try
                 {
                     wait.Until(d => d.FindElements(By.CssSelector("h1, .product-name")).Count > 0);
                 }
                 catch { }
-                
+
                 await Task.Delay(700);
 
                 html = _driver.PageSource;
@@ -505,12 +505,12 @@ public class HepsiburadaScraper : IDisposable
                 htmlDoc.LoadHtml(html);
             }
 
-            var product = new ProductInfo 
-            { 
+            var product = new ProductInfo
+            {
                 ProductUrl = productUrl,
                 Source = "Orange"
             };
-            
+
             // EXTRACT PRODUCT ID from URL
             try
             {
@@ -521,7 +521,7 @@ public class HepsiburadaScraper : IDisposable
                 }
             }
             catch { }
-            
+
             // EXTRACT CATEGORY HIERARCHY from utagData script
             // This is critical for grouping products by category in Excel export
             try
@@ -532,21 +532,21 @@ public class HepsiburadaScraper : IDisposable
                     foreach (var scriptNode in scriptNodes)
                     {
                         var scriptText = scriptNode.InnerText;
-                        
+
                         // Extract category_id_hierarchy: "2147483637 > 235604 > 234329"
                         var categoryIdMatch = Regex.Match(scriptText, @"""category_id_hierarchy""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
                         if (categoryIdMatch.Success)
                         {
                             product.CategoryIdHierarchy = categoryIdMatch.Groups[1].Value.Trim();
                         }
-                        
+
                         // Extract category_name_hierarchy: "Beyaz Esya / Mutfak > Beyaz Esya & Ankastre > Ankastre Setler"
                         var categoryNameMatch = Regex.Match(scriptText, @"""category_name_hierarchy""\s*:\s*""([^""]+)""", RegexOptions.IgnoreCase);
                         if (categoryNameMatch.Success)
                         {
                             product.CategoryNameHierarchy = categoryNameMatch.Groups[1].Value.Trim();
                         }
-                        
+
                         // Also try to extract barcode from utagData if not found elsewhere
                         if (string.IsNullOrEmpty(product.Barcode))
                         {
@@ -556,7 +556,7 @@ public class HepsiburadaScraper : IDisposable
                                 product.Barcode = barcodeMatch.Groups[1].Value.Trim();
                             }
                         }
-                        
+
                         // Extract brand from utagData if not found
                         if (string.IsNullOrEmpty(product.Brand))
                         {
@@ -566,7 +566,7 @@ public class HepsiburadaScraper : IDisposable
                                 product.Brand = brandMatch.Groups[1].Value.Trim();
                             }
                         }
-                        
+
                         break; // Found utagData script, no need to continue
                     }
                 }
@@ -574,7 +574,7 @@ public class HepsiburadaScraper : IDisposable
             catch (Exception ex)
             {
             }
-            
+
             // EXTRACT PRODUCT NAME
             try
             {
@@ -604,7 +604,7 @@ public class HepsiburadaScraper : IDisposable
                         break;
                     }
                 }
-                
+
                 if (string.IsNullOrEmpty(product.Brand))
                 {
                     var scriptNodes = htmlDoc.DocumentNode.SelectNodes("//script[contains(text(), 'brand')]");
@@ -638,7 +638,7 @@ public class HepsiburadaScraper : IDisposable
                                            document.querySelector('[itemprop=""price""]');
                             return priceElem ? priceElem.textContent.trim() : '';
                         ");
-                        
+
                         if (priceData != null && !string.IsNullOrWhiteSpace(priceData.ToString()))
                         {
                             product.DiscountedPrice = CleanPrice(priceData.ToString()!);
@@ -646,7 +646,7 @@ public class HepsiburadaScraper : IDisposable
                     }
                     catch { }
                 }
-                
+
                 if (string.IsNullOrEmpty(product.DiscountedPrice))
                 {
                     var priceSelectors = new[] {
@@ -688,7 +688,7 @@ public class HepsiburadaScraper : IDisposable
             try
             {
                 var allImages = new List<string>();
-                
+
                 if (Method == ScrapeMethod.Selenium && _driver != null)
                 {
                     try
@@ -724,22 +724,22 @@ public class HepsiburadaScraper : IDisposable
                             
                             return images.join('|||');
                         ");
-                        
+
                         if (imageUrls != null && !string.IsNullOrWhiteSpace(imageUrls.ToString()))
                         {
                             var urls = imageUrls.ToString()!.Split(new[] { "|||" }, StringSplitOptions.RemoveEmptyEntries);
                             foreach (var url in urls)
                             {
                                 var imgUrl = ConvertToHighResImage(url.Trim());
-                                
+
                                 if (imgUrl.StartsWith("//"))
                                     imgUrl = "https:" + imgUrl;
-                                
-                                if (imgUrl.Contains("automation", StringComparison.OrdinalIgnoreCase) || 
+
+                                if (imgUrl.Contains("automation", StringComparison.OrdinalIgnoreCase) ||
                                     imgUrl.Contains("badge", StringComparison.OrdinalIgnoreCase) ||
                                     imgUrl.Contains("banners", StringComparison.OrdinalIgnoreCase))
                                     continue;
-                                
+
                                 if (!allImages.Contains(imgUrl))
                                     allImages.Add(imgUrl);
                             }
@@ -747,7 +747,7 @@ public class HepsiburadaScraper : IDisposable
                     }
                     catch { }
                 }
-                
+
                 // Fallback: Parse HTML directly
                 if (allImages.Count == 0)
                 {
@@ -759,7 +759,7 @@ public class HepsiburadaScraper : IDisposable
                             allImages.Add(imgUrl);
                     }
                 }
-                
+
                 if (allImages.Count > 0)
                 {
                     product.ImageUrl = allImages[0];
@@ -782,7 +782,7 @@ public class HepsiburadaScraper : IDisposable
                         desc = desc.Substring(0, 2000) + "...";
                     product.Description = desc;
                 }
-                
+
                 // Fallback to script extraction
                 if (string.IsNullOrEmpty(product.Description))
                 {
@@ -845,18 +845,18 @@ public class HepsiburadaScraper : IDisposable
     {
         try
         {
-            
+
             // Method 1: JavaScript extraction for Selenium (most reliable for dynamic content)
             if (Method == ScrapeMethod.Selenium && _driver != null)
             {
                 try
                 {
                     var jsExecutor = (IJavaScriptExecutor)_driver;
-                    
+
                     // Scroll to trigger lazy loading of product details section
                     jsExecutor.ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
                     await Task.Delay(700);
-                    
+
                     // Force display of lazy-loaded sections
                     jsExecutor.ExecuteScript(@"
                         document.querySelectorAll('section[data-hydration-on-demand]').forEach(function(section) {
@@ -864,9 +864,9 @@ public class HepsiburadaScraper : IDisposable
                             section.setAttribute('data-hydration-on-demand', 'false');
                         });
                     ");
-                    
+
                     await Task.Delay(1000);
-                    
+
                     // Extract attributes using multiple methods
                     var jsData = jsExecutor.ExecuteScript(@"
                         var attrs = [];
@@ -888,8 +888,8 @@ public class HepsiburadaScraper : IDisposable
                             
                             var key = keyDiv.textContent.trim();
                             
-                            // Stop if we hit 'Hatalý içerik bildir'
-                            if (key.includes('Hatalý') || key.includes('içerik') || key.includes('bildir')) {
+                            // Stop if we hit 'Hatalï¿½ iï¿½erik bildir'
+                            if (key.includes('Hatalï¿½') || key.includes('iï¿½erik') || key.includes('bildir')) {
                                 console.log('[Hepsiburada JS] Reached end marker at index ' + i);
                                 break;
                             }
@@ -926,7 +926,7 @@ public class HepsiburadaScraper : IDisposable
                                     var key2 = hasKey.textContent.trim();
                                     
                                     // Stop at end marker
-                                    if (key2.includes('Hatalý') || key2.includes('içerik') || key2.includes('bildir')) {
+                                    if (key2.includes('Hatalï¿½') || key2.includes('iï¿½erik') || key2.includes('bildir')) {
                                         console.log('[Hepsiburada JS] Method 2: Reached end marker');
                                         break;
                                     }
@@ -945,33 +945,33 @@ public class HepsiburadaScraper : IDisposable
                         console.log('[Hepsiburada JS] Total attributes extracted: ' + attrs.length);
                         return JSON.stringify(attrs);
                     ");
-                    
+
                     if (jsData != null && !string.IsNullOrWhiteSpace(jsData.ToString()))
                     {
                         using var doc = JsonDocument.Parse(jsData.ToString()!);
                         int jsCount = 0;
                         foreach (var attr in doc.RootElement.EnumerateArray())
                         {
-                            if (attr.TryGetProperty("key", out var keyElem) && 
+                            if (attr.TryGetProperty("key", out var keyElem) &&
                                 attr.TryGetProperty("value", out var valueElem))
                             {
                                 var key = keyElem.GetString();
                                 var value = valueElem.GetString();
-                                
+
                                 if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(value))
                                 {
                                     // Clean up whitespace
                                     key = Regex.Replace(key, @"\s+", " ").Trim();
                                     value = Regex.Replace(value, @"\s+", " ").Trim();
-                                    
+
                                     // Skip if it's the end marker
-                                    if (key.Contains("Hatalý", StringComparison.OrdinalIgnoreCase) ||
-                                        key.Contains("içerik", StringComparison.OrdinalIgnoreCase) ||
+                                    if (key.Contains("Hatalï¿½", StringComparison.OrdinalIgnoreCase) ||
+                                        key.Contains("iï¿½erik", StringComparison.OrdinalIgnoreCase) ||
                                         key.Contains("bildir", StringComparison.OrdinalIgnoreCase))
                                     {
                                         break;
                                     }
-                                    
+
                                     if (!product.Attributes.ContainsKey(key))
                                     {
                                         product.Attributes[key] = value;
@@ -981,7 +981,7 @@ public class HepsiburadaScraper : IDisposable
                             }
                         }
                     }
-                    
+
                     // Get updated HTML after lazy loading
                     var updatedHtml = _driver.PageSource;
                     htmlDoc = new HtmlDocument();
@@ -991,14 +991,14 @@ public class HepsiburadaScraper : IDisposable
                 {
                 }
             }
-            
+
             // Method 2: HTML parsing with specific Hepsiburada classes
             if (product.Attributes.Count == 0)
             {
-                
+
                 // Try with partial class matching using contains
                 var attributeContainers = htmlDoc.DocumentNode.SelectNodes("//div[contains(@class, 'jkj4C4LML4qv2Iq8GkL3')]");
-                
+
                 if (attributeContainers != null && attributeContainers.Count > 0)
                 {
                     int htmlCount = 0;
@@ -1009,27 +1009,27 @@ public class HepsiburadaScraper : IDisposable
                             // Get key from div with class containing OXP5AzPvafgN_i3y6wGp
                             var keyDiv = container.SelectSingleNode(".//div[contains(@class, 'OXP5AzPvafgN_i3y6wGp')]");
                             if (keyDiv == null) continue;
-                            
+
                             var key = Regex.Replace(keyDiv.InnerText.Trim(), @"\s+", " ");
-                            
+
                             // Stop at end marker
-                            if (key.Contains("Hatalý", StringComparison.OrdinalIgnoreCase) ||
-                                key.Contains("içerik", StringComparison.OrdinalIgnoreCase) ||
+                            if (key.Contains("Hatalï¿½", StringComparison.OrdinalIgnoreCase) ||
+                                key.Contains("iï¿½erik", StringComparison.OrdinalIgnoreCase) ||
                                 key.Contains("bildir", StringComparison.OrdinalIgnoreCase))
                             {
                                 break;
                             }
-                            
+
                             // Get value from div with class containing AxM3TmSghcDRH1F871Vh
                             var valueDiv = container.SelectSingleNode(".//div[contains(@class, 'AxM3TmSghcDRH1F871Vh')]");
                             if (valueDiv == null) continue;
-                            
+
                             // Try to get span first, fallback to div text
                             var valueSpan = valueDiv.SelectSingleNode(".//span");
-                            var value = valueSpan != null 
+                            var value = valueSpan != null
                                 ? Regex.Replace(valueSpan.InnerText.Trim(), @"\s+", " ")
                                 : Regex.Replace(valueDiv.InnerText.Trim(), @"\s+", " ");
-                            
+
                             if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value) && !product.Attributes.ContainsKey(key))
                             {
                                 product.Attributes[key] = value;
@@ -1043,12 +1043,12 @@ public class HepsiburadaScraper : IDisposable
                 {
                 }
             }
-            
+
             // Method 3: Fallback to table parsing (old structure)
             if (product.Attributes.Count == 0)
             {
                 var attributeRows = htmlDoc.DocumentNode.SelectNodes("//table//tr[.//td[2]]");
-                
+
                 if (attributeRows != null && attributeRows.Count > 0)
                 {
                     int tableCount = 0;
@@ -1061,7 +1061,7 @@ public class HepsiburadaScraper : IDisposable
                             {
                                 var key = Regex.Replace(cells[0].InnerText.Trim(), @"\s+", " ");
                                 var value = Regex.Replace(cells[1].InnerText.Trim(), @"\s+", " ");
-                                
+
                                 if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value) && !product.Attributes.ContainsKey(key))
                                 {
                                     product.Attributes[key] = value;
@@ -1073,7 +1073,7 @@ public class HepsiburadaScraper : IDisposable
                     }
                 }
             }
-            
+
             // Method 4: Parse definition lists (another fallback)
             if (product.Attributes.Count == 0)
             {
@@ -1088,12 +1088,12 @@ public class HepsiburadaScraper : IDisposable
                             var dd = dt.NextSibling;
                             while (dd != null && dd.Name != "dd")
                                 dd = dd.NextSibling;
-                            
+
                             if (dd != null)
                             {
                                 var key = Regex.Replace(dt.InnerText.Trim(), @"\s+", " ");
                                 var value = Regex.Replace(dd.InnerText.Trim(), @"\s+", " ");
-                                
+
                                 if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value) && !product.Attributes.ContainsKey(key))
                                 {
                                     product.Attributes[key] = value;
@@ -1115,7 +1115,7 @@ public class HepsiburadaScraper : IDisposable
         catch (Exception ex)
         {
         }
-        
+
         await Task.CompletedTask;
     }
 
@@ -1129,20 +1129,20 @@ public class HepsiburadaScraper : IDisposable
     {
         if (string.IsNullOrEmpty(imageUrl))
             return imageUrl;
-        
+
         // Pattern 1: /s/{number}/{dimensions like 424-600}/{imageid}.jpg
         // Replace dimensions like 424-600, 48-64, 222-222, etc. with 1000-1000
         var pattern1 = @"/s/(\d+)/(\d+-\d+)/";
         var result = Regex.Replace(imageUrl, pattern1, "/s/$1/1000-1000/");
-        
+
         // Pattern 2: /s/{number}/{single number like 375}/{imageid}
         // Replace single dimension numbers (2-4 digits) with 1000-1000
         var pattern2 = @"/s/(\d+)/(\d{2,4})/";
         result = Regex.Replace(result, pattern2, "/s/$1/1000-1000/");
-        
+
         // Also remove /format:webp suffix if present
         result = Regex.Replace(result, @"/format:webp$", "");
-        
+
         return result;
     }
 
@@ -1150,7 +1150,7 @@ public class HepsiburadaScraper : IDisposable
     {
         if (string.IsNullOrWhiteSpace(priceText))
             return "";
-        
+
         var match = Regex.Match(priceText, @"([\d.,]+)");
         if (match.Success)
         {
@@ -1159,16 +1159,16 @@ public class HepsiburadaScraper : IDisposable
                 return numericValue + " TL";
             return numericValue + " TL";
         }
-        
+
         return priceText.Trim();
     }
 
     public async Task<List<ProductInfo>> ScrapeAllProductsAsync(string categoryUrl, int maxProducts = 50)
     {
         var products = new List<ProductInfo>();
-        
+
         var productLinks = await GetProductLinksAsync(categoryUrl, maxProducts);
-        
+
         var linksToProcess = productLinks.Take(maxProducts).ToList();
 
         foreach (var link in linksToProcess)
@@ -1178,7 +1178,7 @@ public class HepsiburadaScraper : IDisposable
             {
                 products.Add(product);
             }
-            
+
             await Task.Delay(300);
         }
 

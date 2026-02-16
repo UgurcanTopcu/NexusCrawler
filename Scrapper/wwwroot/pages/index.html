@@ -254,29 +254,31 @@
                         <div class="form-group">
                             <label>Platform</label>
                             <select id="platform" onchange="updateExample()">
-                                <option value="trendyol">Trendyol</option>
                                 <option value="hepsiburada">Hepsiburada</option>
+                                <option value="trendyol">Trendyol</option>
                             </select>
                         </div>
 
                         <div class="form-group">
                             <label>Scraping Method</label>
                             <select id="scrapeMethod">
-                                <option value="Selenium">Selenium (Free)</option>
                                 <option value="ScrapeDo">Scrape.do API (Faster)</option>
+                                <option value="Selenium">Selenium (Free)</option>
                             </select>
                         </div>
 
                         <div class="form-group full-width">
-                            <label>Category URL</label>
-                            <input type="text" id="categoryUrl" 
-                                placeholder="https://www.trendyol.com/yuz-kremi-x-c1122"
-                                value="https://www.trendyol.com/yuz-kremi-x-c1122" required>
+                            <label>Category URL(s) <span style="font-size:11px;color:#64748b;">(one per line for multiple)</span></label>
+                            <textarea id="categoryUrl" rows="4"
+                                placeholder="https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849"
+                                style="width:100%;padding:12px 16px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:10px;color:#e2e8f0;font-size:14px;resize:vertical;font-family:inherit;"
+                                required>https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849</textarea>
+                            <div class="input-hint">Paste multiple URLs (one per line) to create separate Excel files for each</div>
                         </div>
 
                         <div class="form-group">
-                            <label>Maximum Products</label>
-                            <input type="number" id="maxProducts" min="1" value="20" required>
+                            <label>Maximum Products (per URL)</label>
+                            <input type="number" id="maxProducts" min="1" value="500" required>
                             <div class="input-hint">Enter any number - no limit</div>
                         </div>
 
@@ -301,7 +303,7 @@
                                     <label for="excludePrice">Exclude Price from Excel</label>
                                 </div>
                                 <div class="checkbox-item">
-                                    <input type="checkbox" id="processImages" checked>
+                                    <input type="checkbox" id="processImages">
                                     <label for="processImages">Process & Upload Images to CDN</label>
                                 </div>
                             </div>
@@ -309,9 +311,9 @@
 
                         <div class="form-group full-width">
                             <div class="example-box" id="exampleUrls">
-                                <strong>Example URLs:</strong><br>
-                                • Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122<br>
-                                • Skincare: https://www.trendyol.com/cilt-bakimi-x-c1121
+                                <strong>Example URLs (Hepsiburada):</strong><br>
+                                • Tablets: https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849<br>
+                                • Tip: Paste multiple URLs (one per line) for batch processing
                             </div>
                         </div>
                     </div>
@@ -371,10 +373,10 @@
             const categoryUrl = document.getElementById('categoryUrl');
             
             if (platform === 'hepsiburada') {
-                exampleUrls.innerHTML = '<strong>Example URLs (Hepsiburada):</strong><br>• Tablets: https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849';
+                exampleUrls.innerHTML = '<strong>Example URLs (Hepsiburada):</strong><br>• Tablets: https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849<br>• Tip: Paste multiple URLs (one per line) for batch processing';
                 categoryUrl.value = 'https://www.hepsiburada.com/apple-tablet-xc-3008012-b8849';
             } else {
-                exampleUrls.innerHTML = '<strong>Example URLs (Trendyol):</strong><br>• Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122';
+                exampleUrls.innerHTML = '<strong>Example URLs (Trendyol):</strong><br>• Face Cream: https://www.trendyol.com/yuz-kremi-x-c1122<br>• Tip: Paste multiple URLs (one per line) for batch processing';
                 categoryUrl.value = 'https://www.trendyol.com/yuz-kremi-x-c1122';
             }
         }
@@ -442,55 +444,93 @@
             document.getElementById('progressCard').classList.add('show');
             clearLog();
 
-            const formData = {
-                platform: document.getElementById('platform').value,
-                categoryUrl: document.getElementById('categoryUrl').value,
-                maxProducts: parseInt(document.getElementById('maxProducts').value),
-                scrapeMethod: document.getElementById('scrapeMethod').value,
-                templateName: document.getElementById('template').value || null,
-                excludePrice: document.getElementById('excludePrice').checked,
-                processImages: document.getElementById('processImages').checked,
-                sessionId: sessionId
-            };
+            // Parse URLs - support multiple URLs (one per line)
+            const rawUrls = document.getElementById('categoryUrl').value
+                .split('\n')
+                .map(u => u.trim())
+                .filter(u => u.length > 0 && (u.startsWith('http://') || u.startsWith('https://')));
+            
+            if (rawUrls.length === 0) {
+                addLog('No valid URLs found. URLs must start with http:// or https://', 'error');
+                isRunning = false;
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Scraping';
+                document.getElementById('stopBtn').classList.remove('show');
+                return;
+            }
 
-            addLog('Starting scraper...', 'info');
+            const totalUrls = rawUrls.length;
+            addLog(`Starting scraper for ${totalUrls} URL(s)...`, 'info');
 
-            try {
-                const response = await fetch('/api/scrape', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(formData)
-                });
+            for (let urlIdx = 0; urlIdx < totalUrls; urlIdx++) {
+                const currentUrl = rawUrls[urlIdx];
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
+                if (!isRunning) {
+                    addLog('Stopped by user', 'warning');
+                    break;
+                }
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+                if (totalUrls > 1) {
+                    addLog(`\n━━━ URL ${urlIdx + 1}/${totalUrls}: ${currentUrl} ━━━`, 'info');
+                }
 
-                    const lines = decoder.decode(value).split('\n');
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-                                
-                                if (data.progress !== undefined) updateProgress(data.progress);
-                                if (data.message) addLog(data.message, data.type || 'info');
-                                
-                                if (data.downloadUrl) {
-                                    const link = document.createElement('a');
-                                    link.href = data.downloadUrl;
-                                    link.className = 'download-link';
-                                    link.innerHTML = '<span>⬇️</span> Download Excel';
-                                    document.getElementById('logBody').appendChild(link);
-                                }
-                            } catch (err) {}
+                const formData = {
+                    platform: document.getElementById('platform').value,
+                    categoryUrl: currentUrl,
+                    maxProducts: parseInt(document.getElementById('maxProducts').value),
+                    scrapeMethod: document.getElementById('scrapeMethod').value,
+                    templateName: document.getElementById('template').value || null,
+                    excludePrice: document.getElementById('excludePrice').checked,
+                    processImages: document.getElementById('processImages').checked,
+                    sessionId: sessionId + '_' + urlIdx
+                };
+
+                try {
+                    const response = await fetch('/api/scrape', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData)
+                    });
+                    
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        const lines = decoder.decode(value).split('\n');
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.slice(6));
+                                    
+                                    // Scale progress across all URLs
+                                    if (data.progress !== undefined) {
+                                        const scaledProgress = Math.round((urlIdx * 100 + data.progress) / totalUrls);
+                                        updateProgress(scaledProgress);
+                                    }
+                                    if (data.message) addLog(data.message, data.type || 'info');
+                                    
+                                    if (data.downloadUrl) {
+                                        const link = document.createElement('a');
+                                        link.href = data.downloadUrl;
+                                        link.className = 'download-link';
+                                        link.innerHTML = `<span>⬇️</span> Download Excel${totalUrls > 1 ? ' (' + (urlIdx + 1) + '/' + totalUrls + ')' : ''}`;
+                                        document.getElementById('logBody').appendChild(link);
+                                    }
+                                } catch (err) {}
+                            }
                         }
                     }
+                } catch (err) {
+                    addLog(`Error on URL ${urlIdx + 1}: ${err.message}`, 'error');
                 }
-            } catch (err) {
-                addLog('Error: ' + err.message, 'error');
+            }
+
+            if (totalUrls > 1) {
+                addLog(`\n✓ Completed all ${totalUrls} URLs!`, 'success');
+                updateProgress(100);
             }
 
             isRunning = false;
