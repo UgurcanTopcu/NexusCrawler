@@ -19,11 +19,10 @@ public class BulkImageExcelExporter
 
 
 
-
             using var package = new ExcelPackage();
             var worksheet = package.Workbook.Worksheets.Add("Processed Images");
 
-            // Write ALL cells preserving original structure - no columns are skipped
+            // Write ALL original cells preserving structure
             for (int row = 0; row < excelData.AllCells.Count; row++)
             {
                 var rowData = excelData.AllCells[row];
@@ -37,6 +36,75 @@ public class BulkImageExcelExporter
                 }
             }
 
+            // Add new columns for resized images AFTER the original columns
+            // Create header for new columns if original has header
+            int newColumnsStartIndex = excelData.TotalColumns + 1;
+            
+            if (excelData.HasHeader)
+            {
+                foreach (var imageCol in excelData.ImageColumns.OrderBy(x => x))
+                {
+                    var originalHeader = excelData.Headers.Count >= imageCol 
+                        ? excelData.Headers[imageCol - 1] 
+                        : $"Column {imageCol}";
+                    
+                    worksheet.Cells[1, newColumnsStartIndex].Value = $"{originalHeader} (Resized)";
+                    worksheet.Cells[1, newColumnsStartIndex].Style.Font.Bold = true;
+                    worksheet.Cells[1, newColumnsStartIndex].Style.Fill.PatternType = ExcelFillStyle.Solid;
+                    worksheet.Cells[1, newColumnsStartIndex].Style.Fill.BackgroundColor.SetColor(Color.LightGreen);
+                    newColumnsStartIndex++;
+                }
+            }
+
+            // Map each image column to its new resized column
+            var imageColumnMapping = new Dictionary<int, int>();
+            int mappingIndex = excelData.TotalColumns + 1;
+            foreach (var imageCol in excelData.ImageColumns.OrderBy(x => x))
+            {
+                imageColumnMapping[imageCol] = mappingIndex++;
+            }
+
+            // Fill in the resized URLs in the new columns
+            int successCount = 0;
+            int failCount = 0;
+
+            foreach (var imageCell in excelData.ImageCells)
+            {
+                // Original column keeps original URL (already written above)
+                var originalCell = worksheet.Cells[imageCell.Row, imageCell.Column];
+                
+                // New column gets the resized URL
+                if (imageColumnMapping.TryGetValue(imageCell.Column, out var newColIndex))
+                {
+                    var resizedCell = worksheet.Cells[imageCell.Row, newColIndex];
+                    
+                    if (imageCell.IsProcessed && !string.IsNullOrEmpty(imageCell.CdnUrl))
+                    {
+                        // Successfully processed - put CDN URL in new column
+                        resizedCell.Value = imageCell.CdnUrl;
+                        resizedCell.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                        resizedCell.Style.Fill.BackgroundColor.SetColor(Color.LightGreen);
+                        resizedCell.Style.Font.Color.SetColor(Color.DarkGreen);
+                        
+                        // Mark original cell with light green border to show it was processed
+                        originalCell.Style.Border.BorderAround(ExcelBorderStyle.Thin, Color.Green);
+                        successCount++;
+                    }
+                    else if (imageCell.IsProcessed && !string.IsNullOrEmpty(imageCell.Error))
+                    {
+                        // Failed - put error in new column
+                        resizedCell.Value = $"ERROR: {imageCell.Error}";
+                        resizedCell.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                        resizedCell.Style.Fill.BackgroundColor.SetColor(Color.LightCoral);
+                        resizedCell.Style.Font.Color.SetColor(Color.DarkRed);
+                        
+                        // Mark original cell with red border to show it failed
+                        originalCell.Style.Border.BorderAround(ExcelBorderStyle.Thin, Color.Red);
+                        failCount++;
+                    }
+                }
+            }
+
             // Style header row if present
             if (excelData.HasHeader && excelData.AllCells.Count > 0)
             {
@@ -45,39 +113,6 @@ public class BulkImageExcelExporter
                 headerRange.Style.Fill.PatternType = ExcelFillStyle.Solid;
                 headerRange.Style.Fill.BackgroundColor.SetColor(Color.LightBlue);
                 headerRange.Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
-            }
-
-            // Highlight ONLY the cells that were processed (image URLs)
-            // Non-image cells remain with default white background
-            int successCount = 0;
-            int failCount = 0;
-
-            foreach (var imageCell in excelData.ImageCells)
-            {
-                var cell = worksheet.Cells[imageCell.Row, imageCell.Column];
-                
-                if (imageCell.IsProcessed && !string.IsNullOrEmpty(imageCell.CdnUrl))
-                {
-                    // Successfully processed - replace with CDN URL and light green background
-                    cell.Value = imageCell.CdnUrl;
-                    cell.Style.Fill.PatternType = ExcelFillStyle.Solid;
-                    cell.Style.Fill.BackgroundColor.SetColor(Color.LightGreen);
-                    cell.Style.Font.Color.SetColor(Color.DarkGreen);
-                    successCount++;
-                }
-                else if (imageCell.IsProcessed && !string.IsNullOrEmpty(imageCell.Error))
-                {
-                    // Failed - keep original URL, light red background, add error comment
-                    cell.Value = imageCell.OriginalUrl;
-                    cell.Style.Fill.PatternType = ExcelFillStyle.Solid;
-                    cell.Style.Fill.BackgroundColor.SetColor(Color.LightCoral);
-                    cell.Style.Font.Color.SetColor(Color.DarkRed);
-                    
-                    // Add error as comment
-                    var comment = cell.AddComment($"? Error: {imageCell.Error}\n\nOriginal URL kept: {imageCell.OriginalUrl}");
-                    comment.AutoFit = true;
-                    failCount++;
-                }
             }
 
             // Add summary sheet with detailed statistics
@@ -201,18 +236,26 @@ public class BulkImageExcelExporter
 
             // Auto-fit columns in main sheet (with max width)
             worksheet.Cells.AutoFitColumns();
+            
+            // Original columns
             for (int i = 1; i <= excelData.TotalColumns; i++)
             {
-                // Image columns get more width for URLs
                 if (excelData.ImageColumns.Contains(i))
                 {
+                    // Original image columns
                     worksheet.Column(i).Width = Math.Min(70, Math.Max(50, worksheet.Column(i).Width));
                 }
                 else
                 {
-                    // Data columns use reasonable width
+                    // Data columns
                     worksheet.Column(i).Width = Math.Min(40, Math.Max(15, worksheet.Column(i).Width));
                 }
+            }
+            
+            // New resized image columns
+            for (int i = excelData.TotalColumns + 1; i < excelData.TotalColumns + excelData.ImageColumns.Count + 1; i++)
+            {
+                worksheet.Column(i).Width = Math.Min(80, Math.Max(60, worksheet.Column(i).Width));
             }
 
             // Freeze top row if there's a header
@@ -231,6 +274,97 @@ public class BulkImageExcelExporter
         catch (Exception ex)
         {
 
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Export URL list processing results
+    /// </summary>
+    public void ExportUrlResults(List<(string originalUrl, string? convertedUrl, bool success, string? error)> results, string filePath)
+    {
+        try
+        {
+            using var package = new ExcelPackage();
+            var worksheet = package.Workbook.Worksheets.Add("Converted URLs");
+
+            // Headers
+            worksheet.Cells[1, 1].Value = "Original URL (Before Resizing)";
+            worksheet.Cells[1, 2].Value = "Status";
+            worksheet.Cells[1, 3].Value = "Resized URL (After - wsrv.nl 1000x1000)";
+            worksheet.Cells[1, 4].Value = "Error Message";
+
+            // Style headers
+            using (var headerRange = worksheet.Cells[1, 1, 1, 4])
+            {
+                headerRange.Style.Font.Bold = true;
+                headerRange.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                headerRange.Style.Fill.BackgroundColor.SetColor(Color.LightBlue);
+                headerRange.Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
+            }
+
+            // Data rows
+            int row = 2;
+            foreach (var result in results)
+            {
+                // Original URL
+                worksheet.Cells[row, 1].Value = result.originalUrl;
+                
+                // Status
+                worksheet.Cells[row, 2].Value = result.success ? "? Success" : "? Failed";
+                
+                // Converted URL
+                worksheet.Cells[row, 3].Value = result.convertedUrl ?? "";
+                
+                // Error
+                worksheet.Cells[row, 4].Value = result.error ?? "";
+
+                // Color code the status
+                if (result.success)
+                {
+                    worksheet.Cells[row, 2].Style.Fill.PatternType = ExcelFillStyle.Solid;
+                    worksheet.Cells[row, 2].Style.Fill.BackgroundColor.SetColor(Color.LightGreen);
+                    worksheet.Cells[row, 2].Style.Font.Color.SetColor(Color.DarkGreen);
+                    
+                    worksheet.Cells[row, 3].Style.Fill.PatternType = ExcelFillStyle.Solid;
+                    worksheet.Cells[row, 3].Style.Fill.BackgroundColor.SetColor(Color.LightGreen);
+                    worksheet.Cells[row, 3].Style.Font.Color.SetColor(Color.DarkGreen);
+                    
+                    // Add green border to original URL
+                    worksheet.Cells[row, 1].Style.Border.BorderAround(ExcelBorderStyle.Thin, Color.Green);
+                }
+                else
+                {
+                    worksheet.Cells[row, 2].Style.Fill.PatternType = ExcelFillStyle.Solid;
+                    worksheet.Cells[row, 2].Style.Fill.BackgroundColor.SetColor(Color.LightCoral);
+                    worksheet.Cells[row, 2].Style.Font.Color.SetColor(Color.DarkRed);
+                    
+                    worksheet.Cells[row, 4].Style.Font.Color.SetColor(Color.DarkRed);
+                    
+                    // Add red border to original URL
+                    worksheet.Cells[row, 1].Style.Border.BorderAround(ExcelBorderStyle.Thin, Color.Red);
+                }
+
+                row++;
+            }
+
+            // Auto-fit columns
+            worksheet.Cells.AutoFitColumns();
+            worksheet.Column(1).Width = Math.Min(70, Math.Max(40, worksheet.Column(1).Width)); // Original URL
+            worksheet.Column(3).Width = Math.Min(80, Math.Max(50, worksheet.Column(3).Width)); // Resized URL
+
+            // Freeze top row
+            worksheet.View.FreezePanes(2, 1);
+
+            // Save
+            var file = new FileInfo(filePath);
+            package.SaveAs(file);
+
+            Console.WriteLine($"[BulkImageExporter] Exported {results.Count} URL results to {filePath}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BulkImageExporter] Error exporting URL results: {ex.Message}");
             throw;
         }
     }

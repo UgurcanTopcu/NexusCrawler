@@ -5,19 +5,11 @@ using Scrapper.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddSingleton<CdnFtpConfig>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<HttpClient>();
 
-builder.Services.AddSingleton<CdnCacheService>();
-builder.Services.AddSingleton<FtpUploadService>();
-builder.Services.AddSingleton<ImageProcessingService>(sp =>
-{
-    var httpClient = new HttpClient();
-    var ftpService = sp.GetRequiredService<FtpUploadService>();
-    var cdnCache = sp.GetRequiredService<CdnCacheService>();
-    return new ImageProcessingService(httpClient, ftpService, cdnCache);
-});
+// New wsrv.nl image service (replaces FTP-based CDN)
+builder.Services.AddSingleton<WsrvImageService>();
 
 builder.Services.AddSingleton<TrendyolScraperService>();
 builder.Services.AddSingleton<HepsiburadaScraperService>();
@@ -148,6 +140,44 @@ app.MapPost("/api/akakce/scrape-category", async (AkakceCategoryRequest request,
                 request.SessionId,
                 request.StartFrom,
                 request.ScanVariants
+            );
+        }
+        catch (Exception ex)
+        {
+            await SseHelper.SendErrorAsync(writer, ex.Message);
+        }
+    }, "text/event-stream");
+});
+
+// Bulk image URL list processing endpoint (no Excel file)
+app.MapPost("/api/bulk-image/process-urls", async (HttpRequest request, BulkImageProcessingService bulkImageService) =>
+{
+    return Results.Stream(async (stream) =>
+    {
+        var writer = new StreamWriter(stream);
+        
+        try
+        {
+            var form = await request.ReadFormAsync();
+            var urlsText = form["urls"].ToString();
+            var sessionId = form["sessionId"].ToString();
+            
+            if (string.IsNullOrWhiteSpace(urlsText))
+            {
+                await SseHelper.SendErrorAsync(writer, "No URLs provided");
+                return;
+            }
+            
+            // Split by newlines and filter out empty lines
+            var urls = urlsText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                              .Select(u => u.Trim())
+                              .Where(u => !string.IsNullOrWhiteSpace(u))
+                              .ToList();
+            
+            await bulkImageService.ProcessUrlListAsync(
+                urls,
+                SseHelper.CreateProgressCallback(writer),
+                sessionId
             );
         }
         catch (Exception ex)

@@ -55,22 +55,17 @@ public class HepsiburadaScraperService
             // Initialize image services ONCE if needed
             FtpUploadService? ftpService = null;
             HttpClient? httpClient = null;
-            ImageProcessingService? imageService = null;
             CdnCacheService? cdnCache = null;
+            var progressPerProduct = 80.0 / linksToProcess.Count;
+            var currentProgress = 10.0;
+
+            // Initialize image service if needed (wsrv.nl - no upload, just URL transformation)
+            WsrvImageService? wsrvImageService = null;
 
             if (processImages)
             {
-                var ftpConfig = new CdnFtpConfig();
-                ftpService = new FtpUploadService(ftpConfig);
-                httpClient = new HttpClient();
-                cdnCache = new CdnCacheService(ftpConfig);
-                imageService = new ImageProcessingService(httpClient, ftpService, cdnCache);
-
-                await onProgress(8, "Loading CDN cache...", "info");
-                await imageService.InitializeCacheAsync();
-
-                var (siteCount, productCount) = cdnCache.GetCacheStats();
-                await onProgress(9, $"CDN cache ready: {productCount} products", "info");
+                wsrvImageService = new WsrvImageService();
+                await onProgress(9, "Image CDN ready (wsrv.nl)", "info");
             }
 
             // Parallel product detail scraping with rate limiting
@@ -169,11 +164,11 @@ public class HepsiburadaScraperService
                         await onProgress(progressPercent, $"Scraped: {displayNameSuccess}", "success");
 
                         // Process images
-                        if (processImages && imageService != null && !cts.Token.IsCancellationRequested)
+                        if (processImages && wsrvImageService != null && !cts.Token.IsCancellationRequested)
                         {
                             try
                             {
-                                var (mainImage, additionalImages) = await imageService.ProcessProductImagesAsync(
+                                var (mainImage, additionalImages) = await wsrvImageService.ProcessProductImagesAsync(
                                     product,
                                     async (msg) => await onProgress(progressPercent, msg, "info")
                                 );
