@@ -7,6 +7,9 @@ namespace Scrapper.Services;
 public class AkakceSearchService
 {
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _sessions = new();
+    private const int MAX_RETRIES = 3; // Retry failed searches up to 3 times
+    private const int CHECKPOINT_INTERVAL = 50; // Save progress every 50 products
+    private const int CONNECTION_CHECK_INTERVAL = 100; // Check Edge connection every 100 products
 
     public static void StopSession(string sessionId)
     {
@@ -56,6 +59,10 @@ public class AkakceSearchService
             var progressPerProduct = 82.0 / productNames.Count;
             var currentProgress = 12.0;
 
+            int successCount = 0;
+            int failedCount = 0;
+            int retryCount = 0;
+
             for (int i = 0; i < productNames.Count; i++)
             {
                 if (cts.Token.IsCancellationRequested)
@@ -65,47 +72,116 @@ public class AkakceSearchService
                 }
 
                 var productName = productNames[i];
-                await onProgress((int)currentProgress, $"🔍 Searching {i + 1}/{productNames.Count}: {TruncateName(productName, 50)}...", "info");
+                await onProgress((int)currentProgress, $"🔍 [{i + 1}/{productNames.Count}] {TruncateName(productName, 50)}... (✓{successCount} ✗{failedCount} 🔄{retryCount})", "info");
 
-                try
+                // Periodic connection health check
+                if (i > 0 && i % CONNECTION_CHECK_INTERVAL == 0)
                 {
-                    var productUrl = await scraper.SearchProductAsync(productName);
-
-                    if (string.IsNullOrEmpty(productUrl))
+                    await onProgress((int)currentProgress, $"🔗 Connection health check... ({i} products processed)", "info");
+                    try
                     {
-                        await onProgress((int)currentProgress, $"⚠️ No results for: {TruncateName(productName, 40)}", "warning");
-                        products.Add(new AkakceProductInfo
-                        {
-                            Name = productName,
-                            ErrorMessage = "No search results found"
-                        });
-                        currentProgress += progressPerProduct;
-                        continue;
+                        // Try a simple operation to verify connection is still alive
+                        var testUrl = scraper.GetType().GetProperty("Method")?.GetValue(scraper);
+                        Console.WriteLine($"[AkakceSearch] Connection OK at product {i}");
                     }
-
-                    await onProgress((int)currentProgress, "📊 Found product, scraping sellers...", "info");
-
-                    var product = await scraper.ScrapeProductAsync(productUrl, scanVariants);
-                    product.Description = $"Search term: {productName}";
-                    products.Add(product);
-
-                    var sellerInfo = product.HasVariants 
-                        ? $"{product.Variants.Count} variants, {product.Variants.Sum(v => v.SellerCount)} sellers"
-                        : $"{product.SellerCount} sellers";
-                    
-                    await onProgress((int)currentProgress, $"✅ {TruncateName(product.Name, 40)}: {sellerInfo}", "success");
-                }
-                catch (Exception ex)
-                {
-                    await onProgress((int)currentProgress, $"❌ Error searching '{TruncateName(productName, 30)}': {ex.Message}", "error");
-                    products.Add(new AkakceProductInfo
+                    catch (Exception checkEx)
                     {
-                        Name = productName,
-                        ErrorMessage = ex.Message
-                    });
+                        Console.WriteLine($"[AkakceSearch] Connection check failed: {checkEx.Message}");
+                        await onProgress((int)currentProgress, "⚠️ Connection issue detected, may need to reconnect...", "warning");
+                    }
+                }
+
+                // Checkpoint progress periodically
+                if (i > 0 && i % CHECKPOINT_INTERVAL == 0 && products.Count > 0)
+                {
+                    await onProgress((int)currentProgress, $"💾 Progress checkpoint: {i}/{productNames.Count} processed...", "info");
+                    try
+                    {
+                        var checkpointFile = $"AkakceSearch_Checkpoint_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+                        var checkpointPath = Path.Combine(Directory.GetCurrentDirectory(), checkpointFile);
+                        var exporter = new AkakceExcelExporter();
+                        exporter.Export(products, checkpointPath);
+                        Console.WriteLine($"[AkakceSearch] Checkpoint saved: {checkpointFile}");
+                    }
+                    catch (Exception cpEx)
+                    {
+                        Console.WriteLine($"[AkakceSearch] Checkpoint save failed: {cpEx.Message}");
+                    }
+                }
+
+                // Retry logic for failed searches
+                AkakceProductInfo? product = null;
+                string? productUrl = null;
+                bool searchSuccess = false;
+                int attemptNum = 0;
+
+                for (attemptNum = 1; attemptNum <= MAX_RETRIES && !searchSuccess; attemptNum++)
+                {
+                    try
+                    {
+                        if (attemptNum > 1)
+                        {
+                            retryCount++;
+                            await onProgress((int)currentProgress, $"🔄 Retry {attemptNum}/{MAX_RETRIES} for: {TruncateName(productName, 40)}...", "warning");
+                            await Task.Delay(3000 * attemptNum); // Exponential backoff
+                        }
+
+                        productUrl = await scraper.SearchProductAsync(productName);
+
+                        if (string.IsNullOrEmpty(productUrl))
+                        {
+                            if (attemptNum == MAX_RETRIES)
+                            {
+                                await onProgress((int)currentProgress, $"⚠️ No results after {MAX_RETRIES} tries: {TruncateName(productName, 40)}", "warning");
+                                product = new AkakceProductInfo
+                                {
+                                    Name = productName,
+                                    ErrorMessage = $"No search results found after {MAX_RETRIES} attempts (may be Cloudflare blocked)"
+                                };
+                                failedCount++;
+                            }
+                            continue; // Try again
+                        }
+
+                        await onProgress((int)currentProgress, "📊 Found product, scraping sellers...", "info");
+
+                        product = await scraper.ScrapeProductAsync(productUrl, scanVariants);
+                        product.Description = $"Search term: {productName}";
+                        searchSuccess = true;
+                        successCount++;
+
+                        var sellerInfo = product.HasVariants 
+                            ? $"{product.Variants.Count} variants, {product.Variants.Sum(v => v.SellerCount)} sellers"
+                            : $"{product.SellerCount} sellers";
+                        
+                        await onProgress((int)currentProgress, $"✅ {TruncateName(product.Name, 40)}: {sellerInfo}", "success");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[AkakceSearch] Attempt {attemptNum} failed for '{productName}': {ex.Message}");
+                        
+                        if (attemptNum == MAX_RETRIES)
+                        {
+                            await onProgress((int)currentProgress, $"❌ Failed after {MAX_RETRIES} tries '{TruncateName(productName, 30)}': {ex.Message}", "error");
+                            product = new AkakceProductInfo
+                            {
+                                Name = productName,
+                                ErrorMessage = $"Failed after {MAX_RETRIES} attempts: {ex.Message}"
+                            };
+                            failedCount++;
+                        }
+                    }
+                }
+
+                if (product != null)
+                {
+                    products.Add(product);
                 }
 
                 currentProgress += progressPerProduct;
+                
+                // Add a small delay between searches to avoid rate limiting
+                await Task.Delay(500);
             }
 
             if (products.Count > 0)
@@ -119,9 +195,10 @@ public class AkakceSearchService
                 var exporter = new AkakceExcelExporter();
                 exporter.Export(products, filePath);
 
-                var successCount = products.Count(p => p.IsSuccess);
-                await onProgress(100, $"✅ Done! {successCount}/{products.Count} products found", "success");
-                await SendComplete(onProgress, fileName, successCount);
+                var finalSuccessCount = products.Count(p => p.IsSuccess);
+                var finalFailedCount = products.Count - finalSuccessCount;
+                await onProgress(100, $"✅ Done! {finalSuccessCount} succeeded, {finalFailedCount} failed (Total attempts: {retryCount} retries)", "success");
+                await SendComplete(onProgress, fileName, finalSuccessCount);
             }
             else
             {

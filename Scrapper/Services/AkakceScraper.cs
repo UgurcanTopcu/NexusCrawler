@@ -45,9 +45,15 @@ public class AkakceScraper : IDisposable
 
     
     
-    // Delay settings - SHORT since using real profile (no Cloudflare)
-    private const int MIN_DELAY_SEARCH = 1;
-    private const int MAX_DELAY_SEARCH = 2;
+    
+    
+    
+
+    
+    
+    // Delay settings - INCREASED for bulk searches (2000+ products)
+    private const int MIN_DELAY_SEARCH = 2;
+    private const int MAX_DELAY_SEARCH = 4;
     
     // Minimum delay between product page loads (in seconds)
     private const int MIN_DELAY_BETWEEN_PRODUCTS = 2;
@@ -716,8 +722,9 @@ public class AkakceScraper : IDisposable
 
     /// <summary>
     /// Wait for Cloudflare challenge to complete with human behavior simulation
+    /// REDUCED timeout for bulk searches - was 90s, now 15s to avoid wasting time
     /// </summary>
-    private async Task<bool> WaitForCloudflareWithHumanBehavior(int maxWaitSeconds = 90)
+    private async Task<bool> WaitForCloudflareWithHumanBehavior(int maxWaitSeconds = 15)
     {
         if (_driver == null) return false;
         
@@ -883,27 +890,39 @@ public class AkakceScraper : IDisposable
             var searchUrl = $"https://www.akakce.com/arama/?q={encodedQuery}";
 
             
+            
             // Navigate directly
             _driver.Navigate().GoToUrl(searchUrl);
             
             // Wait for page to load
-            await Task.Delay(3000);
+            await Task.Delay(2000);
 
+            // FAST CLOUDFLARE CHECK - Don't waste time on blocked searches
+            var title = _driver.Title ?? "";
+            var pageSource = "";
+            try { pageSource = _driver.PageSource ?? ""; } catch { }
+            
+            bool isCloudflare = 
+                title.Contains("Bir dakika", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("Just a moment", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("Checking your browser", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("Attention Required", StringComparison.OrdinalIgnoreCase) ||
+                pageSource.Contains("cf-browser-verification", StringComparison.OrdinalIgnoreCase) ||
+                pageSource.Contains("challenge-platform", StringComparison.OrdinalIgnoreCase) ||
+                pageSource.Contains("Verify you are human", StringComparison.OrdinalIgnoreCase);
+            
+            if (isCloudflare)
+            {
+                Console.WriteLine($"[AkakceSearch] ?? Cloudflare detected for '{productName}' - SKIPPING to save time");
+                _cloudflareDetected = true;
+                return null; // Fast-fail instead of waiting
+            }
             
             // Check if we were redirected directly to a product page
             var currentUrl = _driver.Url;
             if (IsProductUrl(currentUrl))
             {
                 return currentUrl;
-            }
-            
-            // Check for Cloudflare
-            var title = _driver.Title ?? "";
-            if (title.Contains("Bir dakika", StringComparison.OrdinalIgnoreCase) ||
-                title.Contains("Just a moment", StringComparison.OrdinalIgnoreCase))
-            {
-
-                return null;
             }
             
             // Extract first product URL from search results
@@ -981,8 +1000,9 @@ public class AkakceScraper : IDisposable
 
     /// <summary>
     /// Simple navigation that waits for Cloudflare challenge to complete
+    /// REDUCED timeout for bulk operations
     /// </summary>
-    private async Task<bool> NavigateSimple(string url, int timeoutSeconds = 30)
+    private async Task<bool> NavigateSimple(string url, int timeoutSeconds = 15)
     {
         if (_driver == null) return false;
         
