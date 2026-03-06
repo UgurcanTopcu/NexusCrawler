@@ -1,4 +1,4 @@
-using OfficeOpenXml;
+﻿using OfficeOpenXml;
 using OfficeOpenXml.Style;
 using Scrapper.Models;
 using System.Drawing;
@@ -7,26 +7,27 @@ namespace Scrapper.Services;
 
 /// <summary>
 /// Exports price comparison data to an Excel pivot-style report.
-/// Columns: Product Name | My Price | [Marketplace�] | Best Price | Delta%
+/// Columns: Product Name | My Price | [Marketplace…] | Best Price | Delta%
 /// </summary>
 public class AkakcePriceComparisonExcelExporter
 {
     private static readonly Color HeaderBlue = Color.FromArgb(31, 78, 121);
     private static readonly Color HeaderGreen = Color.FromArgb(14, 100, 55);
     private static readonly Color RowAlt = Color.FromArgb(242, 242, 242);
-    private static readonly Color DeltaPositive = Color.FromArgb(255, 199, 206); // red tint � my price higher
-    private static readonly Color DeltaNegative = Color.FromArgb(198, 239, 206); // green tint � my price lower
-    private static readonly Color StockOutColor = Color.FromArgb(255, 235, 156); // yellow � stock out
+    private static readonly Color DeltaPositive = Color.FromArgb(255, 199, 206);   // red tint – my price higher
+    private static readonly Color DeltaNegative = Color.FromArgb(198, 239, 206);   // green tint – my price lower
+    private static readonly Color StockOutColor = Color.FromArgb(255, 235, 156);   // yellow – stock out
+    private static readonly Color BestPriceHighlight = Color.FromArgb(255, 165, 0); // orange – best price in row
 
     /// <summary>
     /// The fixed list of tracked marketplaces, in display order.
     /// </summary>
     private static readonly string[] TrackedMarketplaces =
     [
-        "Amazon T�rkiye",
-        "�i�ekSepeti",
+        "Amazon Türkiye",
+        "ÇiçekSepeti",
         "Hepsiburada",
-        "�defix",
+        "İdefix",
         "Media Markt",
         "Media Markt Pazar Yeri",
         "n11",
@@ -45,6 +46,7 @@ public class AkakcePriceComparisonExcelExporter
         using var package = new ExcelPackage();
 
         CreateSummarySheet(package, rows);
+        CreateFocusedComparisonSheet(package, rows);
         CreateComparisonSheet(package, rows);
         CreateRawDataSheet(package, rows);
 
@@ -52,7 +54,7 @@ public class AkakcePriceComparisonExcelExporter
     }
 
     // ??????????????????????????????????????????????????????????????????????????
-    // Sheet 1 � Summary dashboard
+    // Sheet 1 – Summary dashboard
     // ??????????????????????????????????????????????????????????????????????????
 
     private static void CreateSummarySheet(ExcelPackage package, List<PriceComparisonRow> rows)
@@ -81,7 +83,7 @@ public class AkakcePriceComparisonExcelExporter
         }
 
         // Row 3, Col C header
-        ws.Cells[3, 3].Value = "En uygun Fiyatl� �r�n say�s�";
+        ws.Cells[3, 3].Value = "En uygun Fiyatlı Ürün sayısı";
         ws.Cells[3, 3].Style.Font.Bold = true;
 
         // Marketplace list starting at row 4
@@ -89,7 +91,7 @@ public class AkakcePriceComparisonExcelExporter
         for (int i = 0; i < TrackedMarketplaces.Length; i++)
         {
             int r = startRow + i;
-            var mpCell = ws.Cells[r, 2]; // column B � marketplace name
+            var mpCell = ws.Cells[r, 2]; // column B – marketplace name
             mpCell.Value = TrackedMarketplaces[i];
             mpCell.Style.Font.Bold = true;
             mpCell.Style.Font.Color.SetColor(Color.White);
@@ -97,7 +99,7 @@ public class AkakcePriceComparisonExcelExporter
             mpCell.Style.Fill.BackgroundColor.SetColor(HeaderBlue);
             mpCell.Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
 
-            var countCell = ws.Cells[r, 3]; // column C � count
+            var countCell = ws.Cells[r, 3]; // column C – count
             var count = bestPriceCounts[TrackedMarketplaces[i]];
             if (count > 0)
                 countCell.Value = count;
@@ -110,7 +112,7 @@ public class AkakcePriceComparisonExcelExporter
 
         // ?? RIGHT SECTION: Delta % distribution buckets ?????????????????????????
         // Header in row 3
-        ws.Cells[3, 5].Value = "En uygun �r�ne g�re pahal� oldu�umuz say�";
+        ws.Cells[3, 5].Value = "En uygun ürüne göre pahalı olduğumuz sayı";
         ws.Cells[3, 5].Style.Font.Bold = true;
 
         // Compute buckets from comparableRows that also have MyPrice
@@ -154,9 +156,152 @@ public class AkakcePriceComparisonExcelExporter
         ws.Column(6).Width = 10;
     }
 
-    // ??????????????????????????????????????????????????????????????????????????
-    // Sheet 2 � Comparison pivot
-    // ??????????????????????????????????????????????????????????????????????????
+    // ──────────────────────────────────────────────────────────────────────────
+    // Sheet 2 – Focused comparison (tracked marketplaces only, best price highlighted)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static void CreateFocusedComparisonSheet(ExcelPackage package, List<PriceComparisonRow> rows)
+    {
+        var ws = package.Workbook.Worksheets.Add("Price Comparison Focused");
+
+        // ── Header row ────────────────────────────────────────────────────────
+        int col = 1;
+        ws.Cells[1, col++].Value = "Ürün Adı";
+        ws.Cells[1, col++].Value = "Fiyatım";
+        ws.Cells[1, col++].Value = "Akakçe Ürün Adı";
+
+        int mpStartCol = col;
+        foreach (var mp in TrackedMarketplaces)
+            ws.Cells[1, col++].Value = mp;
+
+        int bestPriceCol = col++;
+        int deltaCol = col;
+
+        ws.Cells[1, bestPriceCol].Value = "En İyi Fiyat";
+        ws.Cells[1, deltaCol].Value = "Delta %";
+
+        int totalCols = deltaCol;
+
+        StyleHeader(ws.Cells[1, 1, 1, totalCols], HeaderBlue);
+        StyleHeader(ws.Cells[1, bestPriceCol, 1, deltaCol], HeaderGreen);
+
+        // ── Data rows ─────────────────────────────────────────────────────────
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            int r = i + 2;
+            bool isAlt = i % 2 == 1;
+
+            col = 1;
+            ws.Cells[r, col++].Value = row.SearchName;
+            SetPriceCell(ws.Cells[r, col++], row.MyPrice, row.IsStockOut);
+            ws.Cells[r, col++].Value = string.IsNullOrEmpty(row.AkakceName) ? row.SearchName : row.AkakceName;
+
+            // Track which column holds the lowest tracked-marketplace price
+            decimal rowBestPrice = decimal.MaxValue;
+            int rowBestCol = -1;
+
+            for (int m = 0; m < TrackedMarketplaces.Length; m++)
+            {
+                int c2 = mpStartCol + m;
+                var cell = ws.Cells[r, c2];
+                if (row.MarketplaceBestPrices.TryGetValue(TrackedMarketplaces[m], out var mpPrice))
+                {
+                    SetNumericPriceCell(cell, mpPrice);
+                    if (mpPrice < rowBestPrice)
+                    {
+                        rowBestPrice = mpPrice;
+                        rowBestCol = c2;
+                    }
+                }
+                else
+                {
+                    cell.Value = "-";
+                }
+            }
+
+            // Highlight the best-price cell in this row with orange
+            if (rowBestCol > 0)
+            {
+                var best = ws.Cells[r, rowBestCol];
+                best.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                best.Style.Fill.BackgroundColor.SetColor(BestPriceHighlight);
+                best.Style.Font.Bold = true;
+            }
+
+            // Best price column
+            if (row.BestPrice > 0)
+                SetNumericPriceCell(ws.Cells[r, bestPriceCol], row.BestPrice);
+            else
+                ws.Cells[r, bestPriceCol].Value = "-";
+
+            // Delta %
+            if (row.DeltaPercent.HasValue)
+            {
+                var deltaCell = ws.Cells[r, deltaCol];
+                deltaCell.Value = row.DeltaPercent.Value / 100;
+                deltaCell.Style.Numberformat.Format = "+0.00%;-0.00%;0.00%";
+                deltaCell.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                deltaCell.Style.Fill.BackgroundColor.SetColor(row.DeltaPercent.Value > 0 ? DeltaPositive : DeltaNegative);
+            }
+            else if (row.IsStockOut)
+            {
+                var cell = ws.Cells[r, deltaCol];
+                cell.Value = "Stock Out";
+                cell.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                cell.Style.Fill.BackgroundColor.SetColor(StockOutColor);
+            }
+            else
+            {
+                ws.Cells[r, deltaCol].Value = "-";
+            }
+
+            // Alternate row shading (skip cells that already have a colour)
+            if (isAlt)
+            {
+                for (int c2 = 1; c2 <= totalCols; c2++)
+                {
+                    var cell = ws.Cells[r, c2];
+                    if (cell.Style.Fill.PatternType == ExcelFillStyle.None)
+                    {
+                        cell.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                        cell.Style.Fill.BackgroundColor.SetColor(RowAlt);
+                    }
+                }
+            }
+
+            // Hyperlink on Akakçe name
+            if (!string.IsNullOrEmpty(row.AkakceUrl))
+            {
+                ws.Cells[r, 3].Hyperlink = new Uri(row.AkakceUrl);
+                ws.Cells[r, 3].Style.Font.UnderLine = true;
+                ws.Cells[r, 3].Style.Font.Color.SetColor(HeaderBlue);
+            }
+
+            if (!row.IsSuccess)
+            {
+                ws.Cells[r, 1].Style.Font.Color.SetColor(Color.FromArgb(156, 31, 31));
+                ws.Cells[r, 1].Value = $"❌ {row.SearchName}";
+            }
+        }
+
+        // ── Auto-fit ──────────────────────────────────────────────────────────
+        if (ws.Dimension != null)
+        {
+            ws.Cells[ws.Dimension.Address].AutoFitColumns();
+            for (int c2 = 1; c2 <= totalCols; c2++)
+            {
+                if (ws.Column(c2).Width > 45) ws.Column(c2).Width = 45;
+                if (ws.Column(c2).Width < 10) ws.Column(c2).Width = 10;
+            }
+        }
+
+        ws.View.FreezePanes(2, 1);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Sheet 3 – Full comparison pivot (all scraped marketplaces)
+    // ──────────────────────────────────────────────────────────────────────────
 
     private static void CreateComparisonSheet(ExcelPackage package, List<PriceComparisonRow> rows)
     {
@@ -171,9 +316,9 @@ public class AkakcePriceComparisonExcelExporter
 
         // ?? Build header row ??????????????????????????????????????????????????
         int col = 1;
-        ws.Cells[1, col++].Value = "�r�n Ad�";           // A
-        ws.Cells[1, col++].Value = "Fiyat�m";             // B � my price
-        ws.Cells[1, col++].Value = "Akak�e �r�n Ad�";    // C
+        ws.Cells[1, col++].Value = "Ürün Adı";           // A
+        ws.Cells[1, col++].Value = "Fiyatım";             // B – my price
+        ws.Cells[1, col++].Value = "Akakçe Ürün Adı";    // C
 
         int mpStartCol = col;
         foreach (var mp in marketplaces)
@@ -182,7 +327,7 @@ public class AkakcePriceComparisonExcelExporter
         int bestPriceCol = col++;
         int deltaCol = col;
 
-        ws.Cells[1, bestPriceCol].Value = "En �yi Fiyat";
+        ws.Cells[1, bestPriceCol].Value = "En İyi Fiyat";
         ws.Cells[1, deltaCol].Value = "Delta %";
 
         int totalCols = deltaCol;
@@ -258,7 +403,7 @@ public class AkakcePriceComparisonExcelExporter
                 }
             }
 
-            // Hyperlink on Akak�e name cell if we have a URL
+            // Hyperlink on Akakçe name cell if we have a URL
             if (!string.IsNullOrEmpty(row.AkakceUrl))
             {
                 ws.Cells[r, 3].Hyperlink = new Uri(row.AkakceUrl);
@@ -289,14 +434,14 @@ public class AkakcePriceComparisonExcelExporter
     }
 
     // ??????????????????????????????????????????????????????????????????????????
-    // Sheet 3 � Raw data (all sellers flat)
+    // Sheet 3 – Raw data (all sellers flat)
     // ??????????????????????????????????????????????????????????????????????????
 
     private static void CreateRawDataSheet(ExcelPackage package, List<PriceComparisonRow> rows)
     {
         var ws = package.Workbook.Worksheets.Add("Raw Data");
 
-        var headers = new[] { "�r�n Ad�", "Fiyat�m", "Stock Out", "Akak�e �r�n Ad�", "Marketplace", "En �yi Fiyat (Marketplace)", "En �yi Fiyat (Genel)", "Delta %", "Akak�e URL", "Durum" };
+        var headers = new[] { "Ürün Adı", "Fiyatım", "Stock Out", "Akakçe Ürün Adı", "Marketplace", "En İyi Fiyat (Marketplace)", "En İyi Fiyat (Genel)", "Delta %", "Akakçe URL", "Durum" };
         for (int c2 = 0; c2 < headers.Length; c2++)
             ws.Cells[1, c2 + 1].Value = headers[c2];
 
@@ -307,7 +452,7 @@ public class AkakcePriceComparisonExcelExporter
         {
             if (r.MarketplaceBestPrices.Count == 0)
             {
-                // Product with no marketplace data � one row
+                // Product with no marketplace data – one row
                 WriteRawRow(ws, row++, r, null, null);
             }
             else
