@@ -362,6 +362,22 @@ public class AkakceScraper : IDisposable
         }
     }
 
+    /// <summary>
+    /// Lightweight check: returns true if the static driver is reachable.
+    /// </summary>
+    private static bool IsDriverAlive()
+    {
+        if (_driver == null) return false;
+        try
+        {
+            _ = _driver.WindowHandles;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private void InitializeDriver()
     {
@@ -875,12 +891,23 @@ public class AkakceScraper : IDisposable
 
         try
         {
-            // Don't call InitializeDriver - we must be connected via WarmupAsync
-            if (_driver == null)
+            // Verify the driver is alive; reconnect if it dropped since the last search
+            if (!IsDriverAlive())
             {
-                return null;
+                Console.WriteLine("[AkakceSearch] Driver disconnected, attempting to reconnect...");
+                lock (_driverLock)
+                {
+                    try { _driver?.Quit(); } catch { }
+                    _driver = null;
+                    _initializationAttempted = false;
+                }
+                if (!await TryConnectToExistingEdgeAsync())
+                {
+                    Console.WriteLine("[AkakceSearch] Could not reconnect to Edge.");
+                    return null;
+                }
             }
-            
+
             // Short delay before search
             var preSearchDelay = _random.Next(MIN_DELAY_SEARCH, MAX_DELAY_SEARCH);
             await Task.Delay(preSearchDelay * 1000);
@@ -913,9 +940,16 @@ public class AkakceScraper : IDisposable
             
             if (isCloudflare)
             {
-                Console.WriteLine($"[AkakceSearch] ?? Cloudflare detected for '{productName}' - SKIPPING to save time");
+                Console.WriteLine($"[AkakceSearch] Cloudflare detected for '{productName}' - waiting for it to pass...");
                 _cloudflareDetected = true;
-                return null; // Fast-fail instead of waiting
+                var cfPassed = await WaitForCloudflareWithHumanBehavior(CLOUDFLARE_WAIT_TIMEOUT);
+                if (!cfPassed)
+                {
+                    Console.WriteLine($"[AkakceSearch] Cloudflare timeout for '{productName}' - skipping");
+                    return null;
+                }
+                Console.WriteLine($"[AkakceSearch] Cloudflare passed for '{productName}'");
+                try { pageSource = _driver.PageSource ?? ""; } catch { }
             }
             
             // Check if we were redirected directly to a product page

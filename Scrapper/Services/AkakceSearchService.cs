@@ -10,6 +10,7 @@ public class AkakceSearchService
     private const int MAX_RETRIES = 3; // Retry failed searches up to 3 times
     private const int CHECKPOINT_INTERVAL = 50; // Save progress every 50 products
     private const int CONNECTION_CHECK_INTERVAL = 100; // Check Edge connection every 100 products
+    private const int MAX_CONSECUTIVE_FAILURES = 3; // Re-warmup after this many back-to-back failures
 
     public static void StopSession(string sessionId)
     {
@@ -62,6 +63,7 @@ public class AkakceSearchService
             int successCount = 0;
             int failedCount = 0;
             int retryCount = 0;
+            int consecutiveFailures = 0;
 
             for (int i = 0; i < productNames.Count; i++)
             {
@@ -176,6 +178,29 @@ public class AkakceSearchService
                 if (product != null)
                 {
                     products.Add(product);
+                }
+
+                // Track consecutive failures; re-warmup the browser when too many stack up
+                if (searchSuccess)
+                {
+                    consecutiveFailures = 0;
+                }
+                else
+                {
+                    consecutiveFailures++;
+                    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES && !cts.Token.IsCancellationRequested)
+                    {
+                        await onProgress((int)currentProgress,
+                            $"⚠️ {consecutiveFailures} consecutive failures — pausing 20s and reconnecting browser...",
+                            "warning");
+                        await Task.Delay(20000);
+                        var rewarmSuccess = await scraper.WarmupAsync(onProgress);
+                        await onProgress((int)currentProgress,
+                            rewarmSuccess ? "✅ Browser reconnected, resuming..." : "⚠️ Reconnect failed, continuing anyway...",
+                            rewarmSuccess ? "success" : "warning");
+                        if (rewarmSuccess)
+                            consecutiveFailures = 0;
+                    }
                 }
 
                 currentProgress += progressPerProduct;

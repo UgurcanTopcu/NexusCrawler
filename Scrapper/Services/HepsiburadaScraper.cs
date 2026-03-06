@@ -13,6 +13,7 @@ public class HepsiburadaScraper : IDisposable
     private readonly HttpClient _httpClient;
     private IWebDriver? _driver;
     private readonly ScrapeDoService? _scrapeDoService;
+    private readonly Dictionary<string, string> _priceCache = new();
     private const string BaseUrl = "https://www.hepsiburada.com";
     public ScrapeMethod Method { get; set; } = ScrapeMethod.Selenium;
 
@@ -313,9 +314,48 @@ public class HepsiburadaScraper : IDisposable
                         }
                     }
                     
+                    // Extract formattedPrice from embedded product JSON data
+                    var prices = {};
+                    try {
+                        var allScripts = document.querySelectorAll('script:not([src])');
+                        for (var ps = 0; ps < allScripts.length; ps++) {
+                            var sText = allScripts[ps].textContent;
+                            if (sText.indexOf('formattedPrice') === -1) continue;
+                            
+                            // Try to parse the entire script as JSON
+                            try {
+                                var trimmed = sText.trim();
+                                if (trimmed[0] === '{' || trimmed[0] === '[') {
+                                    var parsed = JSON.parse(trimmed);
+                                    (function walk(node) {
+                                        if (!node || typeof node !== 'object') return;
+                                        if (Array.isArray(node)) { for (var ni = 0; ni < node.length; ni++) walk(node[ni]); return; }
+                                        if (node.formattedPrice) {
+                                            var pid = node.productId || node.sku || node.id;
+                                            if (pid) prices[String(pid)] = node.formattedPrice;
+                                        }
+                                        var vals = Object.values(node);
+                                        for (var vi = 0; vi < vals.length; vi++) walk(vals[vi]);
+                                    })(parsed);
+                                    continue;
+                                }
+                            } catch(pe) {}
+                            
+                            // Regex fallback for minified JSON
+                            var priceRe = /""(?:productId|sku)""\s*:\s*""(HB[^""]+)""|""formattedPrice""\s*:\s*""([^""]+)""/g;
+                            var lastId = null;
+                            var pm;
+                            while ((pm = priceRe.exec(sText)) !== null) {
+                                if (pm[1]) { lastId = pm[1]; }
+                                else if (pm[2] && lastId) { prices[lastId] = pm[2]; lastId = null; }
+                            }
+                        }
+                    } catch(priceErr) {}
+                    
                     return JSON.stringify({
                         links: links,
-                        stats: stats
+                        stats: stats,
+                        prices: prices
                     });
                 ");
 
@@ -372,6 +412,16 @@ public class HepsiburadaScraper : IDisposable
 
                             if (newLinksOnPage != rawLinksCount)
                             {
+                            }
+                        }
+
+                        // Populate price cache from category page JSON (formattedPrice)
+                        if (doc.RootElement.TryGetProperty("prices", out var pricesElem))
+                        {
+                            foreach (var price in pricesElem.EnumerateObject())
+                            {
+                                if (!string.IsNullOrEmpty(price.Name))
+                                    _priceCache[price.Name] = price.Value.GetString() ?? string.Empty;
                             }
                         }
                     }
@@ -627,15 +677,24 @@ public class HepsiburadaScraper : IDisposable
             // EXTRACT PRICE
             try
             {
-                if (Method == ScrapeMethod.Selenium && _driver != null)
+                // Primary: use formattedPrice cached from category page JSON
+                if (!string.IsNullOrEmpty(product.ProductId) && _priceCache.TryGetValue(product.ProductId, out var cachedPrice))
+                {
+                    product.DiscountedPrice = cachedPrice;
+                }
+
+                if (string.IsNullOrEmpty(product.DiscountedPrice) && Method == ScrapeMethod.Selenium && _driver != null)
                 {
                     try
                     {
                         var jsExecutor = (IJavaScriptExecutor)_driver!;
                         var priceData = jsExecutor.ExecuteScript(@"
-                            var priceElem = document.querySelector('[data-bind=""markupText:'currentPriceBeforePoint'""]') || 
-                                           document.querySelector('.price-value') ||
-                                           document.querySelector('[itemprop=""price""]');
+                            var priceElem =
+                                document.querySelector('button[aria-label^=""Seçili""] [data-test-id=""variant-box-price""]') ||
+                                document.querySelector('[data-test-id=""variant-box-price""]') ||
+                                document.querySelector('[data-bind=""markupText:\'currentPriceBeforePoint\'""]') ||
+                                document.querySelector('.price-value') ||
+                                document.querySelector('[itemprop=""price""]');
                             return priceElem ? priceElem.textContent.trim() : '';
                         ");
 
@@ -650,6 +709,8 @@ public class HepsiburadaScraper : IDisposable
                 if (string.IsNullOrEmpty(product.DiscountedPrice))
                 {
                     var priceSelectors = new[] {
+                        "//button[starts-with(@aria-label, 'Seçili')]//span[@data-test-id='variant-box-price']",
+                        "//span[@data-test-id='variant-box-price']",
                         "//span[@data-bind=\"markupText:'currentPriceBeforePoint'\"]",
                         "//span[@itemprop='price']",
                         "//*[contains(@class, 'price-value')]"
@@ -662,6 +723,57 @@ public class HepsiburadaScraper : IDisposable
                         {
                             product.DiscountedPrice = CleanPrice(node.InnerText);
                             break;
+                        }
+                    }
+                }
+
+                // JSON-LD fallback: <script type="application/ld+json"> offers.price
+                if (string.IsNullOrEmpty(product.DiscountedPrice))
+                {
+                    var jsonLdNodes = htmlDoc.DocumentNode.SelectNodes("//script[@type='application/ld+json']");
+                    if (jsonLdNodes != null)
+                    {
+                        foreach (var jsonLdNode in jsonLdNodes)
+                        {
+                            try
+                            {
+                                using var ldDoc = JsonDocument.Parse(jsonLdNode.InnerText);
+                                var root = ldDoc.RootElement;
+
+                                // Walk @graph array looking for a Product with offers.price
+                                if (root.TryGetProperty("@graph", out var graph))
+                                {
+                                    foreach (var item in graph.EnumerateArray())
+                                    {
+                                        if (item.TryGetProperty("@type", out var t) && t.GetString() == "Product" &&
+                                            item.TryGetProperty("offers", out var offers) &&
+                                            offers.TryGetProperty("price", out var priceVal))
+                                        {
+                                            var raw = priceVal.ValueKind == JsonValueKind.String
+                                                ? priceVal.GetString()
+                                                : priceVal.GetRawText();
+                                            if (!string.IsNullOrEmpty(raw))
+                                                product.DiscountedPrice = CleanPrice(raw + " TL");
+                                            break;
+                                        }
+                                    }
+                                }
+                                // Also handle flat structure: { "@type":"Product", "offers": { "price": ... } }
+                                else if (root.TryGetProperty("@type", out var rootType) && rootType.GetString() == "Product" &&
+                                         root.TryGetProperty("offers", out var flatOffers) &&
+                                         flatOffers.TryGetProperty("price", out var flatPrice))
+                                {
+                                    var raw = flatPrice.ValueKind == JsonValueKind.String
+                                        ? flatPrice.GetString()
+                                        : flatPrice.GetRawText();
+                                    if (!string.IsNullOrEmpty(raw))
+                                        product.DiscountedPrice = CleanPrice(raw + " TL");
+                                }
+                            }
+                            catch { }
+
+                            if (!string.IsNullOrEmpty(product.DiscountedPrice))
+                                break;
                         }
                     }
                 }
