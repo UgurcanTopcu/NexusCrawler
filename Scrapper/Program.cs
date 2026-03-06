@@ -15,6 +15,7 @@ builder.Services.AddSingleton<TrendyolScraperService>();
 builder.Services.AddSingleton<HepsiburadaScraperService>();
 builder.Services.AddSingleton<AkakceScraperService>();
 builder.Services.AddSingleton<AkakceSearchService>();
+builder.Services.AddSingleton<AkakcePriceComparisonService>();
 builder.Services.AddSingleton<HepsiburadaBarcodeSearchService>();
 
 builder.Services.AddSingleton<BulkImageExcelReader>();
@@ -232,6 +233,40 @@ app.MapPost("/api/akakce/scrape", async (HttpRequest request, AkakceScraperServi
     }, "text/event-stream");
 });
 
+// Akakce price comparison endpoint - search by name + compare against user's prices
+app.MapPost("/api/akakce/price-compare", async (HttpRequest request, AkakcePriceComparisonService compareService) =>
+{
+    return Results.Stream(async (stream) =>
+    {
+        var writer = new StreamWriter(stream);
+
+        try
+        {
+            var form = await request.ReadFormAsync();
+            var file = form.Files.GetFile("file");
+            var sessionId = form["sessionId"].ToString();
+
+            if (file == null || file.Length == 0)
+            {
+                await SseHelper.SendNoFileErrorAsync(writer);
+                return;
+            }
+
+            using var memoryStream = await SseHelper.ReadFileToMemoryStreamAsync(file);
+
+            await compareService.CompareFromExcelAsync(
+                memoryStream,
+                SseHelper.CreateProgressCallback(writer),
+                sessionId
+            );
+        }
+        catch (Exception ex)
+        {
+            await SseHelper.SendErrorAsync(writer, ex.Message);
+        }
+    }, "text/event-stream");
+});
+
 // Akakce search endpoint - search by product name from Excel
 app.MapPost("/api/akakce/search", async (HttpRequest request, AkakceSearchService searchService) =>
 {
@@ -334,6 +369,7 @@ app.MapPost("/api/akakce/stop/{sessionId}", (string sessionId) =>
 {
     AkakceScraperService.StopSession(sessionId);
     AkakceSearchService.StopSession(sessionId);
+    AkakcePriceComparisonService.StopSession(sessionId);
     Console.WriteLine($"[API] Akakce stop requested for session: {sessionId}");
     return Results.Ok(new { message = "Stop signal sent" });
 });
@@ -407,6 +443,7 @@ Console.WriteLine("🌐 Open your browser and navigate to: http://localhost:5000
 Console.WriteLine("   - Category Scraper: http://localhost:5000/");
 Console.WriteLine("   - Akakce Scraper: http://localhost:5000/akakce");
 Console.WriteLine("   - Akakce Search: http://localhost:5000/akakce-search");
+Console.WriteLine("   - Akakce Price Compare: http://localhost:5000/akakce (Price Compare mode)");
 Console.WriteLine("   - Bulk Image Uploader: http://localhost:5000/bulk-image");
 Console.WriteLine("Press Ctrl+C to stop the server");
 

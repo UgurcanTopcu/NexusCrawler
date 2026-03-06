@@ -256,9 +256,10 @@
             </div>
             <div class="card-body">
                 <div class="mode-toggle">
-                    <div class="mode-btn active" id="modeUrl" onclick="setMode('url')">🔗 Category URL</div>
+                <div class="mode-btn active" id="modeUrl" onclick="setMode('url')">🔗 Category URL</div>
                     <div class="mode-btn" id="modeFile" onclick="setMode('file')">📄 Product URLs (Excel)</div>
                     <div class="mode-btn" id="modeSearch" onclick="setMode('search')">🔍 Search by Name</div>
+                    <div class="mode-btn" id="modePriceCompare" onclick="setMode('priceCompare')">💲 Price Compare</div>
                 </div>
 
                 <form id="akakceForm">
@@ -322,6 +323,7 @@
                     </div>
 
                     
+                    
                     <div class="input-section" id="searchSection">
                         <div class="upload-area" id="uploadAreaSearch">
                             <div class="upload-icon">📂</div>
@@ -346,6 +348,31 @@
                             • iPhone 15 128GB<br>
                             • Samsung Galaxy S24 Ultra<br>
                             • Sony WH-1000XM5
+                        </div>
+                    </div>
+
+                    <!-- Price Compare mode -->
+                    <div class="input-section" id="priceCompareSection">
+                        <div class="upload-area" id="uploadAreaPriceCompare">
+                            <div class="upload-icon">💲</div>
+                            <h3 id="uploadTextPriceCompare">Drop file here or click to browse</h3>
+                            <p id="uploadHintPriceCompare">Excel: row 1 = headers, col A = product name, col B = your price</p>
+                            <input type="file" id="fileInputPriceCompare" accept=".xlsx,.xls" style="display:none">
+                        </div>
+                        <div class="file-selected" id="fileSelectedPriceCompare">
+                            <span>📄</span>
+                            <span class="file-name" id="fileNamePriceCompare"></span>
+                            <button type="button" class="btn-remove" onclick="removeFile('priceCompare', event)">✕</button>
+                        </div>
+
+                        <div class="example-box" style="margin-top: 16px;">
+                            <strong>Expected Excel Format:</strong><br>
+                            Row 1 → headers (e.g. "Ürün Adı", "Fiyat")<br>
+                            Column A → product name (used for Akakçe search)<br>
+                            Column B → your price (numeric, or "stock out")<br><br>
+                            <strong>Output Excel will show:</strong><br>
+                            Best price per marketplace + <strong>Delta %</strong> vs market best price<br>
+                            🟢 Green = your price is lower &nbsp;|&nbsp; 🔴 Red = your price is higher
                         </div>
                     </div>
 
@@ -400,6 +427,7 @@
         let currentMode = 'url';
         let selectedFileUrl = null;
         let selectedFileSearch = null;
+        let selectedFilePriceCompare = null;
 
         // File upload setup
         function setupUpload(areaId, inputId, textId, hintId, selectedId, nameId, type) {
@@ -419,19 +447,21 @@
 
         setupUpload('uploadAreaFile', 'fileInputFile', 'uploadTextFile', 'uploadHintFile', 'fileSelectedFile', 'fileNameFile', 'file');
         setupUpload('uploadAreaSearch', 'fileInputSearch', 'uploadTextSearch', 'uploadHintSearch', 'fileSelectedSearch', 'fileNameSearch', 'search');
+        setupUpload('uploadAreaPriceCompare', 'fileInputPriceCompare', 'uploadTextPriceCompare', 'uploadHintPriceCompare', 'fileSelectedPriceCompare', 'fileNamePriceCompare', 'priceCompare');
 
         function handleFileChange(type) {
-            const input = document.getElementById(type === 'file' ? 'fileInputFile' : 'fileInputSearch');
+            const input = document.getElementById(type === 'file' ? 'fileInputFile' : type === 'search' ? 'fileInputSearch' : 'fileInputPriceCompare');
             const file = input.files[0];
             if (file) {
                 if (type === 'file') selectedFileUrl = file;
-                else selectedFileSearch = file;
+                else if (type === 'search') selectedFileSearch = file;
+                else selectedFilePriceCompare = file;
                 
-                const nameEl = document.getElementById(type === 'file' ? 'fileNameFile' : 'fileNameSearch');
-                const selectedEl = document.getElementById(type === 'file' ? 'fileSelectedFile' : 'fileSelectedSearch');
-                const textEl = document.getElementById(type === 'file' ? 'uploadTextFile' : 'uploadTextSearch');
-                const hintEl = document.getElementById(type === 'file' ? 'uploadHintFile' : 'uploadHintSearch');
-                const areaEl = document.getElementById(type === 'file' ? 'uploadAreaFile' : 'uploadAreaSearch');
+                const nameEl = document.getElementById(type === 'file' ? 'fileNameFile' : type === 'search' ? 'fileNameSearch' : 'fileNamePriceCompare');
+                const selectedEl = document.getElementById(type === 'file' ? 'fileSelectedFile' : type === 'search' ? 'fileSelectedSearch' : 'fileSelectedPriceCompare');
+                const textEl = document.getElementById(type === 'file' ? 'uploadTextFile' : type === 'search' ? 'uploadTextSearch' : 'uploadTextPriceCompare');
+                const hintEl = document.getElementById(type === 'file' ? 'uploadHintFile' : type === 'search' ? 'uploadHintSearch' : 'uploadHintPriceCompare');
+                const areaEl = document.getElementById(type === 'file' ? 'uploadAreaFile' : type === 'search' ? 'uploadAreaSearch' : 'uploadAreaPriceCompare');
                 
                 nameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
                 selectedEl.classList.add('show');
@@ -444,15 +474,16 @@
 
         function removeFile(type, e) {
             if (e) e.stopPropagation();
-            const input = document.getElementById(type === 'file' ? 'fileInputFile' : 'fileInputSearch');
-            const selectedEl = document.getElementById(type === 'file' ? 'fileSelectedFile' : 'fileSelectedSearch');
-            const textEl = document.getElementById(type === 'file' ? 'uploadTextFile' : 'uploadTextSearch');
-            const hintEl = document.getElementById(type === 'file' ? 'uploadHintFile' : 'uploadHintSearch');
-            const areaEl = document.getElementById(type === 'file' ? 'uploadAreaFile' : 'uploadAreaSearch');
+            const input = document.getElementById(type === 'file' ? 'fileInputFile' : type === 'search' ? 'fileInputSearch' : 'fileInputPriceCompare');
+            const selectedEl = document.getElementById(type === 'file' ? 'fileSelectedFile' : type === 'search' ? 'fileSelectedSearch' : 'fileSelectedPriceCompare');
+            const textEl = document.getElementById(type === 'file' ? 'uploadTextFile' : type === 'search' ? 'uploadTextSearch' : 'uploadTextPriceCompare');
+            const hintEl = document.getElementById(type === 'file' ? 'uploadHintFile' : type === 'search' ? 'uploadHintSearch' : 'uploadHintPriceCompare');
+            const areaEl = document.getElementById(type === 'file' ? 'uploadAreaFile' : type === 'search' ? 'uploadAreaSearch' : 'uploadAreaPriceCompare');
             
             input.value = '';
             if (type === 'file') selectedFileUrl = null;
-            else selectedFileSearch = null;
+            else if (type === 'search') selectedFileSearch = null;
+            else selectedFilePriceCompare = null;
             
             selectedEl.classList.remove('show');
             textEl.style.display = 'block';
@@ -466,9 +497,11 @@
             document.getElementById('modeUrl').classList.toggle('active', mode === 'url');
             document.getElementById('modeFile').classList.toggle('active', mode === 'file');
             document.getElementById('modeSearch').classList.toggle('active', mode === 'search');
+            document.getElementById('modePriceCompare').classList.toggle('active', mode === 'priceCompare');
             document.getElementById('urlSection').classList.toggle('active', mode === 'url');
             document.getElementById('fileSection').classList.toggle('active', mode === 'file');
             document.getElementById('searchSection').classList.toggle('active', mode === 'search');
+            document.getElementById('priceCompareSection').classList.toggle('active', mode === 'priceCompare');
             updateStartBtn();
         }
 
@@ -476,7 +509,8 @@
             const btn = document.getElementById('startBtn');
             if (currentMode === 'url') btn.disabled = false;
             else if (currentMode === 'file') btn.disabled = !selectedFileUrl;
-            else btn.disabled = !selectedFileSearch;
+            else if (currentMode === 'search') btn.disabled = !selectedFileSearch;
+            else btn.disabled = !selectedFilePriceCompare;
         }
 
         function addLog(message, type = 'info') {
@@ -505,6 +539,7 @@
             document.getElementById('akakceForm').reset();
             removeFile('file');
             removeFile('search');
+            removeFile('priceCompare');
             setMode('url');
             document.getElementById('progressCard').classList.remove('show');
             document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Scraping';
@@ -557,12 +592,18 @@
                     formData.append('sessionId', sessionId);
                     formData.append('scanVariants', document.getElementById('scanVariantsFile').checked);
                     response = await fetch('/api/akakce/scrape', { method: 'POST', body: formData });
-                } else {
+                } else if (currentMode === 'search') {
                     const formData = new FormData();
                     formData.append('file', selectedFileSearch);
                     formData.append('sessionId', sessionId);
                     formData.append('scanVariants', document.getElementById('scanVariantsSearch').checked);
                     response = await fetch('/api/akakce/search', { method: 'POST', body: formData });
+                } else {
+                    // priceCompare mode
+                    const formData = new FormData();
+                    formData.append('file', selectedFilePriceCompare);
+                    formData.append('sessionId', sessionId);
+                    response = await fetch('/api/akakce/price-compare', { method: 'POST', body: formData });
                 }
 
                 const reader = response.body.getReader();
