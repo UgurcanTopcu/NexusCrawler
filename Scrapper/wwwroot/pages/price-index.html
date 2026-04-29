@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Price Index</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+            min-height: 100vh;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+
+        .app-container { max-width: 900px; margin: 0 auto; }
+
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+        .header p { color: #94a3b8; font-size: 15px; }
+
+        .nav-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 30px; }
+
+        .nav-item {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 14px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .nav-item:hover { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.3); transform: translateY(-2px); }
+        .nav-item.active { background: rgba(16,185,129,0.2); border-color: #10b981; }
+        .nav-item h3 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .nav-item p { font-size: 11px; color: #94a3b8; }
+
+        .card {
+            background: rgba(30,41,59,0.5);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .card-header h2 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .card-body { padding: 20px; }
+
+        .upload-area {
+            border: 2px dashed rgba(16,185,129,0.3);
+            border-radius: 12px;
+            padding: 50px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: rgba(16,185,129,0.05);
+        }
+        .upload-area:hover { border-color: rgba(16,185,129,0.6); background: rgba(16,185,129,0.1); }
+        .upload-area.has-file { border-color: #10b981; border-style: solid; background: rgba(16,185,129,0.1); }
+        .upload-area.drag-over { border-color: #10b981; background: rgba(16,185,129,0.15); transform: scale(1.02); }
+        .upload-icon { font-size: 56px; margin-bottom: 16px; }
+        .upload-area h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #e2e8f0; }
+        .upload-area p { font-size: 13px; color: #94a3b8; }
+
+        .file-selected { display: none; align-items: center; justify-content: center; gap: 12px; margin-top: 16px; padding: 12px 16px; background: rgba(16,185,129,0.15); border-radius: 8px; border: 1px solid rgba(16,185,129,0.3); }
+        .file-selected.show { display: flex; }
+        .file-selected .file-name { font-size: 14px; font-weight: 500; color: #10b981; }
+
+        .btn-remove { background: rgba(239,68,68,0.2); border: none; color: #ef4444; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+        .btn-remove:hover { background: rgba(239,68,68,0.4); }
+
+        /* Date override row */
+        .date-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 14px;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            flex-wrap: wrap;
+        }
+        .date-label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: #94a3b8; white-space: nowrap; }
+        .date-input-wrap { display: flex; align-items: center; gap: 8px; }
+        .date-row input[type="date"] {
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            color: #e2e8f0;
+            font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+            color-scheme: dark;
+            transition: border-color 0.2s;
+        }
+        .date-row input[type="date"]:focus { outline: none; border-color: #10b981; }
+        .date-row input[type="date"].has-value { border-color: #10b981; background: rgba(16,185,129,0.1); color: #6ee7b7; font-weight: 600; }
+        .date-clear { padding: 6px 10px; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); border-radius: 6px; color: #6ee7b7; font-size: 12px; cursor: pointer; display: none; }
+        .date-clear.show { display: inline-flex; align-items: center; gap: 4px; }
+        .date-clear:hover { background: rgba(16,185,129,0.25); }
+        .date-hint { font-size: 12px; color: #64748b; flex: 1; }
+
+        .example-box {
+            background: rgba(16,185,129,0.08);
+            border: 1px solid rgba(16,185,129,0.2);
+            border-radius: 10px;
+            padding: 14px;
+            font-size: 13px;
+            color: #6ee7b7;
+            margin-top: 16px;
+        }
+        .example-box strong { color: #a7f3d0; }
+
+        .action-buttons { display: flex; gap: 10px; margin-top: 20px; }
+        .btn {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+        .btn-primary:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(16,185,129,0.4); }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: #e2e8f0; border: 1px solid rgba(255,255,255,0.2); flex: none; padding: 14px 20px; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+        .btn-danger-outline { background: rgba(239,68,68,0.08); color: #f87171; border: 1px solid rgba(239,68,68,0.3); flex: none; padding: 14px 20px; }
+        .btn-danger-outline:hover { background: rgba(239,68,68,0.15); }
+
+        .progress-card { display: none; }
+        .progress-card.show { display: block; }
+        .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .progress-header span { font-size: 14px; color: #94a3b8; }
+        .progress-header .percent { font-size: 20px; font-weight: 700; color: #10b981; }
+        .progress-track { height: 10px; background: rgba(16,185,129,0.2); border-radius: 10px; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #10b981, #059669); border-radius: 10px; width: 0%; transition: width 0.3s ease; }
+
+        .log-body { max-height: 350px; overflow-y: auto; padding: 0; }
+        .log-body::-webkit-scrollbar { width: 6px; }
+        .log-body::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        .log-body::-webkit-scrollbar-thumb { background: rgba(16,185,129,0.3); border-radius: 3px; }
+        .log-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; color: #64748b; }
+        .log-empty span { font-size: 36px; margin-bottom: 10px; opacity: 0.5; }
+        .log-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+        .log-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+        .log-item.success .log-icon { background: rgba(16,185,129,0.2); color: #10b981; }
+        .log-item.error .log-icon { background: rgba(239,68,68,0.2); color: #ef4444; }
+        .log-item.warning .log-icon { background: rgba(245,158,11,0.2); color: #f59e0b; }
+        .log-item.info .log-icon { background: rgba(59,130,246,0.2); color: #3b82f6; }
+        .log-content { flex: 1; min-width: 0; }
+        .log-message { font-size: 13px; line-height: 1.5; word-break: break-word; }
+        .log-item.success .log-message { color: #10b981; }
+        .log-item.error .log-message { color: #f87171; }
+        .log-item.warning .log-message { color: #fbbf24; }
+        .log-item.info .log-message { color: #e2e8f0; }
+        .log-time { font-size: 11px; color: #64748b; flex-shrink: 0; }
+
+        .btn-clear { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); color: #f87171; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+        .btn-clear:hover { background: rgba(239,68,68,0.2); }
+
+        .download-link { display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 12px 24px; border-radius: 10px; text-decoration: none; font-weight: 600; margin: 16px 20px; }
+        .download-link:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(16,185,129,0.4); }
+
+        .footer { text-align: center; margin-top: 30px; }
+        .footer a { color: #10b981; text-decoration: none; font-size: 14px; }
+        .footer a:hover { color: #6ee7b7; }
+
+        @media (max-width: 768px) { .nav-grid { grid-template-columns: repeat(2, 1fr); } }
+        .dates-grid { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; padding-right: 4px; }
+        .dates-grid::-webkit-scrollbar { width: 5px; }
+        .dates-grid::-webkit-scrollbar-thumb { background: rgba(16,185,129,0.3); border-radius: 3px; }
+        .date-row-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; }
+        .date-row-item span { font-size: 13px; font-weight: 500; color: #e2e8f0; font-variant-numeric: tabular-nums; }
+        .btn-delete-date { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25); color: #f87171; padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; transition: background 0.15s; }
+        .btn-delete-date:hover { background: rgba(239,68,68,0.25); }
+        .db-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+        @media (max-width: 600px) { .db-grid { grid-template-columns: 1fr; } }
+        .db-panel { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px; }
+        .db-panel h4 { font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .db-panel p { font-size: 12px; color: #64748b; margin-bottom: 12px; line-height: 1.5; }
+        .btn-export { width: 100%; padding: 10px; background: linear-gradient(135deg,#0ea5e9,#0284c7); border: none; border-radius: 8px; color: white; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .btn-export:hover { filter: brightness(1.1); }
+        .btn-import { width: 100%; padding: 10px; background: linear-gradient(135deg,#8b5cf6,#7c3aed); border: none; border-radius: 8px; color: white; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; }
+        .btn-import:hover { filter: brightness(1.1); }
+        .import-file-name { font-size: 12px; color: #8b5cf6; margin-top: 6px; text-align: center; min-height: 16px; }
+        .db-header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .db-header-row h4 { font-size: 13px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin: 0; }
+        .btn-refresh-sm { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.25); color: #10b981; padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+        .btn-refresh-sm:hover { background: rgba(16,185,129,0.22); }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+
+        <div class="header">
+            <h1>&#x1F4C8; Price Index</h1>
+            <p>Track daily price changes and trends across your product catalogue</p>
+        </div>
+
+        <div class="nav-grid">
+            <div class="nav-item" onclick="location.href='/'">
+                <h3>&#x1F6D2; Category Scraper</h3>
+                <p>Trendyol &amp; Hepsiburada</p>
+            </div>
+            <div class="nav-item" onclick="location.href='/akakce'">
+                <h3>&#x1F4B0; Akakce Scraper</h3>
+                <p>Price Comparison</p>
+            </div>
+            <div class="nav-item" onclick="location.href='/hepsiburada-barcode'">
+                <h3>&#x1F511; Barcode Search</h3>
+                <p>Hepsiburada Check</p>
+            </div>
+            <div class="nav-item" onclick="location.href='/bulk-image'">
+                <h3>&#x1F5BC;&#xFE0F; Image Processing</h3>
+                <p>Bulk Resizing</p>
+            </div>
+            <div class="nav-item active">
+                <h3>&#x1F4C8; Price Index</h3>
+                <p>Daily Price Trends</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>&#x1F4C2; Upload Daily Export</h2>
+            </div>
+            <div class="card-body">
+
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">&#x1F4CA;</div>
+                    <h3 id="uploadText">Drop your daily Mirakl export here or click to browse</h3>
+                    <p id="uploadHint">Excel (.xlsx) or CSV &mdash; same format (Product Name + Offer Total Price columns required). CSV uses today's date unless you set one manually.</p>
+                    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none">
+                </div>
+
+                <div class="file-selected" id="fileSelected">
+                    <span>&#x1F4C4;</span>
+                    <span class="file-name" id="fileName"></span>
+                    <button type="button" class="btn-remove" onclick="removeFile(event)">&#x2715;</button>
+                </div>
+
+                <div class="date-row">
+                    <div class="date-label">
+                        <span>&#x1F4C5;</span>
+                        <span>Snapshot Date</span>
+                    </div>
+                    <div class="date-input-wrap">
+                        <input type="date" id="dateOverride">
+                        <button type="button" class="date-clear" id="dateClearBtn" onclick="clearDate()">&#x2715; Auto</button>
+                    </div>
+                    <span class="date-hint" id="dateHint">Using Excel file's creation/modified date</span>
+                </div>
+
+                <div class="example-box">
+                    <strong>How it works:</strong><br>
+                    Upload your daily export. Prices are stored by their GMV rank (row position). All rows are kept &mdash; no deduplication.<br><br>
+                    <strong>Report columns:</strong>
+                    &nbsp; &#x1F4C5; <strong>Daily &#x0394;</strong> vs previous upload &nbsp;|&nbsp;
+                    &#x1F4CA; <strong>7d / 30d &#x0394;%</strong> trends &nbsp;|&nbsp;
+                    &#x1F4C9; <strong>All-Time Low / High</strong> &nbsp;|&nbsp;
+                    &#x1F5D3;&#xFE0F; <strong>Last 30 days</strong> of prices<br><br>
+                    &#x1F534; Red = price increase &nbsp;|&nbsp; &#x1F7E2; Green = price decrease &nbsp;|&nbsp; &#x1F7E1; Yellow = stock out<br>
+                    <span style="color:#6b7280;font-size:12px;">Date is read from the Excel file's creation/modified property. Upload daily for full trend history.</span>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="runBtn" onclick="runPriceIndex()" disabled>
+                        <span>&#x1F4CA;</span> Generate Report
+                    </button>
+                    <button class="btn btn-secondary" onclick="showSnapshotDates()">
+                        <span>&#x1F4C5;</span> Tracked Dates
+                    </button>
+                    <button class="btn btn-danger-outline" onclick="clearHistory()">
+                        <span>&#x1F5D1;&#xFE0F;</span> Clear History
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header" style="cursor:pointer;" onclick="toggleOfferImport()">
+                <h2>&#x1F4E5; Offer Data Import</h2>
+                <span id="backfillChevron" style="color:#94a3b8;font-size:18px;">&#x25BC;</span>
+            </div>
+            <div id="backfillBody" class="card-body" style="display:none;">
+
+                <div class="example-box" style="margin-bottom:16px;">
+                    <strong>When to use:</strong> You have a past offers export (Seller / Offer SKU / Price / EAN columns)
+                    and want to inject that data as a previous day's snapshot into your current history.<br><br>
+                    <strong>Matching:</strong> Each row is matched to your tracked products by
+                    <strong>Offer SKU</strong> (primary) or <strong>EAN</strong> (fallback).
+                    Only already-tracked products are updated &mdash; no new entries are created.
+                </div>
+
+                <div class="upload-area" id="backfillUploadArea">
+                    <div class="upload-icon">&#x1F4C2;</div>
+                    <h3 id="backfillUploadText">Drop your offers export here or click to browse</h3>
+                    <p id="backfillUploadHint">Columns: Seller &nbsp;|&nbsp; Offer SKU &nbsp;|&nbsp; Price &nbsp;|&nbsp; Discount price &nbsp;|&nbsp; EAN</p>
+                    <input type="file" id="backfillFileInput" accept=".xlsx,.xls" style="display:none">
+                </div>
+
+                <div class="file-selected" id="backfillFileSelected">
+                    <span>&#x1F4C4;</span>
+                    <span class="file-name" id="backfillFileName"></span>
+                    <button type="button" class="btn-remove" onclick="removeOfferImportFile(event)">&#x2715;</button>
+                </div>
+
+                <div class="date-row" style="margin-top:14px;">
+                    <div class="date-label">
+                        <span>&#x1F4C5;</span>
+                        <span>Date of this data</span>
+                    </div>
+                    <div class="date-input-wrap">
+                        <input type="date" id="backfillDate" class="has-value">
+                    </div>
+                    <span class="date-hint">Required &mdash; the date this file represents</span>
+                </div>
+
+                <div class="action-buttons" style="margin-top:16px;">
+                    <button class="btn btn-primary" id="backfillBtn" onclick="runOfferImport()" disabled
+                        style="background:linear-gradient(135deg,#6366f1,#4f46e5);">
+                        <span>&#x1F4E5;</span> Import Offer Data
+                    </button>
+                </div>
+
+                <div class="card progress-card" id="backfillProgressCard" style="margin-top:16px;border-radius:10px;">
+                    <div class="card-body">
+                        <div class="progress-header">
+                            <span>Import progress</span>
+                            <span class="percent" id="backfillProgressPercent">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-bar" id="backfillProgressBar"
+                                style="background:linear-gradient(90deg,#6366f1,#4f46e5);"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="log-body" id="backfillLogBody" style="max-height:200px;margin-top:8px;">
+                    <div class="log-empty" id="backfillLogEmpty">
+                        <span>&#x23EA;</span>
+                        <p>Upload an offers file and pick a date to inject</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ─── Database Management card ─────────────────────────────────── -->
+        <div class="card">
+            <div class="card-header" style="cursor:pointer;" onclick="toggleDbManage()">
+                <h2>&#x1F5C4;&#xFE0F; Database Management</h2>
+                <span id="dbChevron" style="color:#94a3b8;font-size:18px;">&#x25BC;</span>
+            </div>
+            <div id="dbManageBody" class="card-body" style="display:none;">
+
+                <div class="db-header-row">
+                    <h4>&#x1F4C5; Snapshot Dates</h4>
+                    <button class="btn-refresh-sm" onclick="refreshDatesList()">&#x21BB; Refresh</button>
+                </div>
+                <div id="datesList" class="dates-grid">
+                    <div style="text-align:center;color:#64748b;font-size:13px;padding:16px;">Click Refresh to load dates</div>
+                </div>
+
+                <div class="db-grid">
+                    <div class="db-panel">
+                        <h4>&#x2B07;&#xFE0F; Export Database</h4>
+                        <p>Download the full JSON history file for backup or transfer to another machine.</p>
+                        <button class="btn-export" onclick="exportDb()">
+                            <span>&#x1F4E5;</span> Download JSON
+                        </button>
+                    </div>
+                    <div class="db-panel">
+                        <h4>&#x2B06;&#xFE0F; Import Database</h4>
+                        <p>Upload a previously exported JSON file. <strong style="color:#f87171;">This replaces your current history entirely.</strong></p>
+                        <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="handleImportFile()">
+                        <button class="btn-import" onclick="document.getElementById('importFileInput').click()">
+                            <span>&#x1F4C2;</span> Choose JSON File
+                        </button>
+                        <div class="import-file-name" id="importFileName"></div>
+                        <button class="btn-import" id="importBtn" style="display:none;background:linear-gradient(135deg,#f59e0b,#d97706);" onclick="runImport()">
+                            <span>&#x2B06;&#xFE0F;</span> Import &amp; Replace
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="card progress-card" id="progressCard">
+            <div class="card-body">
+                <div class="progress-header">
+                    <span>Progress</span>
+                    <span class="percent" id="progressPercent">0%</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+            </div>
+        </div>
+
+
+        <div class="card">
+            <div class="card-header">
+                <h2>&#x1F4CB; Activity Log</h2>
+                <button class="btn-clear" onclick="clearLog()">Clear</button>
+            </div>
+            <div class="log-body" id="logBody">
+                <div class="log-empty" id="logEmpty">
+                    <span>&#x1F4C8;</span>
+                    <p>Upload a daily export and click Generate Report</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <a href="/">&#x2190; Back to Home</a>
+        </div>
+
+    </div>
+    <script>
+        let selectedFile = null;
+        let isRunning = false;
+        const MAX_LOG_ITEMS = 150;
+
+        // ??? Date override ????????????????????????????????????????????????????
+        const dateInput    = document.getElementById('dateOverride');
+        const dateClearBtn = document.getElementById('dateClearBtn');
+        const dateHint     = document.getElementById('dateHint');
+
+        dateInput.addEventListener('change', () => {
+            const hasValue = !!dateInput.value;
+            dateInput.classList.toggle('has-value', hasValue);
+            dateClearBtn.classList.toggle('show', hasValue);
+            dateHint.textContent = hasValue
+                ? `Overriding date to: ${dateInput.value}`
+                : "Using Excel file's creation/modified date";
+        });
+
+        function clearDate() {
+            dateInput.value = '';
+            dateInput.classList.remove('has-value');
+            dateClearBtn.classList.remove('show');
+            dateHint.textContent = "Using Excel file's creation/modified date";
+        }
+
+        // ??? File upload ??????????????????????????????????????????????????????
+        const area  = document.getElementById('uploadArea');
+        const input = document.getElementById('fileInput');
+
+        area.addEventListener('click', () => input.click());
+        area.addEventListener('dragover',  (e) => { e.preventDefault(); area.classList.add('drag-over'); });
+        area.addEventListener('dragleave', ()  => area.classList.remove('drag-over'));
+        area.addEventListener('drop', (e) => {
+            e.preventDefault();
+            area.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; handleFileChange(); }
+        });
+        input.addEventListener('change', handleFileChange);
+
+        function handleFileChange() {
+            const file = input.files[0];
+            if (!file) return;
+            selectedFile = file;
+            document.getElementById('fileName').textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+            document.getElementById('fileSelected').classList.add('show');
+            document.getElementById('uploadText').style.display = 'none';
+            document.getElementById('uploadHint').style.display = 'none';
+            area.classList.add('has-file');
+            document.getElementById('runBtn').disabled = false;
+        }
+
+        function removeFile(e) {
+            if (e) e.stopPropagation();
+            selectedFile = null;
+            input.value = '';
+            document.getElementById('fileSelected').classList.remove('show');
+            document.getElementById('uploadText').style.display = 'block';
+            document.getElementById('uploadHint').style.display = 'block';
+            area.classList.remove('has-file');
+            document.getElementById('runBtn').disabled = true;
+        }
+
+        // ??? Log helpers ??????????????????????????????????????????????????????
+        function addLog(message, type = 'info') {
+            const logBody  = document.getElementById('logBody');
+            const logEmpty = document.getElementById('logEmpty');
+            if (logEmpty) logEmpty.style.display = 'none';
+
+            const iconMap = { success: '\u2713', error: '\u2715', warning: '!', info: 'i' };
+            const item = document.createElement('div');
+            item.className = `log-item ${type}`;
+
+            const icon = document.createElement('div');
+            icon.className = 'log-icon';
+            icon.textContent = iconMap[type] || 'i';
+
+            const content = document.createElement('div');
+            content.className = 'log-content';
+            const msg = document.createElement('div');
+            msg.className = 'log-message';
+            msg.textContent = message;
+            content.appendChild(msg);
+
+            const time = document.createElement('div');
+            time.className = 'log-time';
+            time.textContent = new Date().toLocaleTimeString();
+
+            item.append(icon, content, time);
+            logBody.appendChild(item);
+
+            const items = logBody.querySelectorAll('.log-item');
+            if (items.length > MAX_LOG_ITEMS)
+                for (let i = 0; i < items.length - MAX_LOG_ITEMS; i++) items[i].remove();
+
+            logBody.scrollTop = logBody.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('logBody').innerHTML =
+                '<div class="log-empty" id="logEmpty"><span>&#x1F4C8;</span><p>Log cleared</p></div>';
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressPercent').textContent = percent + '%';
+        }
+
+        // ??? SSE consumer ?????????????????????????????????????????????????????
+        function processProgressEvent(eventText) {
+            const dataLines = eventText.split('\n')
+                .filter(l => l.startsWith('data: '))
+                .map(l => l.slice(6));
+            if (!dataLines.length) return;
+            try {
+                const data = JSON.parse(dataLines.join('\n'));
+                if (data.progress !== undefined) updateProgress(data.progress);
+                if (data.message) addLog(data.message, data.type || 'info');
+                if (data.downloadUrl) {
+                    const link = document.createElement('a');
+                    link.href = data.downloadUrl;
+                    link.className = 'download-link';
+                    link.innerHTML = '<span>&#x2B07;&#xFE0F;</span> Download Price Index Report';
+                    document.getElementById('logBody').appendChild(link);
+                }
+            } catch (err) {
+                console.error('Failed to parse SSE event', err, eventText);
+            }
+        }
+
+        async function consumeProgressResponse(response) {
+            const reader  = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const events = buffer.split('\n\n');
+                buffer = events.pop() || '';
+                for (const evt of events) processProgressEvent(evt.trim());
+            }
+            buffer += decoder.decode();
+            if (buffer.trim()) processProgressEvent(buffer.trim());
+        }
+
+        // ??? Main action ??????????????????????????????????????????????????????
+        async function runPriceIndex() {
+            if (!selectedFile || isRunning) return;
+            isRunning = true;
+            document.getElementById('runBtn').disabled = true;
+            document.getElementById('runBtn').innerHTML = '<span>&#x23F3;</span> Processing...';
+            document.getElementById('progressCard').classList.add('show');
+            clearLog();
+            addLog('Starting Price Index report generation...', 'info');
+            try {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+                formData.append('sessionId', 'pi_' + Date.now());
+                const dateVal = dateInput.value;
+                if (dateVal) formData.append('dateOverride', dateVal);
+                const response = await fetch('/api/akakce/price-index', { method: 'POST', body: formData });
+                await consumeProgressResponse(response);
+            } catch (err) {
+                addLog('Error: ' + err.message, 'error');
+            }
+            isRunning = false;
+            document.getElementById('runBtn').disabled = !selectedFile;
+            document.getElementById('runBtn').innerHTML = '<span>&#x1F4CA;</span> Generate Report';
+        }
+
+        // ??? Backfill ?????????????????????????????????????????????????????????
+        let backfillFile    = null;
+        let backfillRunning = false;
+
+        function toggleOfferImport() {
+            const body    = document.getElementById('backfillBody');
+            const chevron = document.getElementById('backfillChevron');
+            const open    = body.style.display === 'none';
+            body.style.display    = open ? 'block' : 'none';
+            chevron.innerHTML     = open ? '&#x25B2;' : '&#x25BC;';
+        }
+
+        (() => {
+            const bArea  = document.getElementById('backfillUploadArea');
+            const bInput = document.getElementById('backfillFileInput');
+            bArea.addEventListener('click', () => bInput.click());
+            bArea.addEventListener('dragover',  (e) => { e.preventDefault(); bArea.classList.add('drag-over'); });
+            bArea.addEventListener('dragleave', ()  => bArea.classList.remove('drag-over'));
+            bArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                bArea.classList.remove('drag-over');
+                if (e.dataTransfer.files.length) { bInput.files = e.dataTransfer.files; handleBackfillFile(); }
+            });
+            bInput.addEventListener('change', handleBackfillFile);
+
+            // Default date to 7 days ago
+            const d = new Date();
+            d.setDate(d.getDate() - 7);
+            document.getElementById('backfillDate').value = d.toISOString().slice(0, 10);
+        })();
+
+        function handleOfferImportFile() {
+            const file = document.getElementById('backfillFileInput').files[0];
+            if (!file) return;
+            offerImportFile = file;
+            document.getElementById('backfillFileName').textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+            document.getElementById('backfillFileSelected').classList.add('show');
+            document.getElementById('backfillUploadText').style.display = 'none';
+            document.getElementById('backfillUploadHint').style.display = 'none';
+            document.getElementById('backfillUploadArea').classList.add('has-file');
+            document.getElementById('backfillBtn').disabled = false;
+        }
+
+        function removeOfferImportFile(e) {
+            if (e) e.stopPropagation();
+            offerImportFile = null;
+            document.getElementById('backfillFileInput').value = '';
+            document.getElementById('backfillFileSelected').classList.remove('show');
+            document.getElementById('backfillUploadText').style.display = 'block';
+            document.getElementById('backfillUploadHint').style.display = 'block';
+            document.getElementById('backfillUploadArea').classList.remove('has-file');
+            document.getElementById('backfillBtn').disabled = true;
+        }
+
+        function addOfferImportLog(message, type = 'info') {
+            const logBody  = document.getElementById('backfillLogBody');
+            const logEmpty = document.getElementById('backfillLogEmpty');
+            if (logEmpty) logEmpty.style.display = 'none';
+            const iconMap = { success: '\u2713', error: '\u2715', warning: '!', info: 'i' };
+            const item = document.createElement('div');
+            item.className = `log-item ${type}`;
+            const icon = document.createElement('div');
+            icon.className = 'log-icon';
+            icon.textContent = iconMap[type] || 'i';
+            const content = document.createElement('div');
+            content.className = 'log-content';
+            const msg = document.createElement('div');
+            msg.className = 'log-message';
+            msg.textContent = message;
+            content.appendChild(msg);
+            const time = document.createElement('div');
+            time.className = 'log-time';
+            time.textContent = new Date().toLocaleTimeString();
+            item.append(icon, content, time);
+            logBody.appendChild(item);
+            logBody.scrollTop = logBody.scrollHeight;
+        }
+
+        async function runOfferImport() {
+            if (!offerImportFile || offerImportRunning) return;
+            const dateVal = document.getElementById('backfillDate').value;
+            if (!dateVal) { addOfferImportLog('Please select a date first', 'warning'); return; }
+
+            offerImportRunning = true;
+            document.getElementById('backfillBtn').disabled = true;
+            document.getElementById('backfillBtn').innerHTML = '<span>&#x23F3;</span> Importing...';
+            document.getElementById('backfillProgressCard').classList.add('show');
+            document.getElementById('backfillLogBody').innerHTML =
+                '<div class="log-empty" id="backfillLogEmpty"><span>&#x23EA;</span><p>Running...</p></div>';
+
+            try {
+                const formData = new FormData();
+                formData.append('file', offerImportFile);
+                formData.append('dateOverride', dateVal);
+                const response = await fetch('/api/akakce/price-index/offer-import', { method: 'POST', body: formData });
+
+                const reader  = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const events = buffer.split('\n\n');
+                    buffer = events.pop() || '';
+                    for (const evt of events) {
+                        const lines = evt.trim().split('\n').filter(l => l.startsWith('data: '));
+                        if (!lines.length) continue;
+                        try {
+                            const data = JSON.parse(lines.map(l => l.slice(6)).join('\n'));
+                            if (data.progress !== undefined) {
+                                document.getElementById('backfillProgressBar').style.width = data.progress + '%';
+                                document.getElementById('backfillProgressPercent').textContent = data.progress + '%';
+                            }
+                            if (data.message) addOfferImportLog(data.message, data.type || 'info');
+                        } catch {}
+                    }
+                }
+            } catch (err) {
+                addOfferImportLog('Error: ' + err.message, 'error');
+            }
+
+            offerImportRunning = false;
+            document.getElementById('backfillBtn').disabled = !offerImportFile;
+            document.getElementById('backfillBtn').innerHTML = '<span>&#x1F4E5;</span> Import Offer Data';
+        }
+        async function showSnapshotDates() {
+            try {
+                const resp = await fetch('/api/akakce/price-index/dates');
+                const data = await resp.json();
+                if (data.count === 0)
+                    addLog('No snapshots yet \u2014 upload your first daily export', 'info');
+                else
+                    addLog(`${data.count} snapshot(s) in history: ${data.dates.join(' | ')}`, 'info');
+            } catch {
+                addLog('Could not fetch snapshot dates', 'error');
+            }
+        }
+
+        async function clearHistory() {
+            if (!confirm('Clear ALL price index history? This cannot be undone.')) return;
+            try {
+                const resp = await fetch('/api/akakce/price-index/clear', { method: 'POST' });
+                if (resp.ok) { addLog('Price index history cleared', 'warning'); refreshDatesList(); }
+                else addLog('Failed to clear history', 'error');
+            } catch {
+                addLog('Could not reach server', 'error');
+            }
+        }
+
+        // ─── Database Management ──────────────────────────────────────────────
+        function toggleDbManage() {
+            const body    = document.getElementById('dbManageBody');
+            const chevron = document.getElementById('dbChevron');
+            const open    = body.style.display === 'none';
+            body.style.display = open ? 'block' : 'none';
+            chevron.innerHTML  = open ? '&#x25B2;' : '&#x25BC;';
+            if (open) refreshDatesList();
+        }
+
+        async function refreshDatesList() {
+            const list = document.getElementById('datesList');
+            list.innerHTML = '<div style="text-align:center;color:#64748b;font-size:13px;padding:16px;">Loading...</div>';
+            try {
+                const resp = await fetch('/api/akakce/price-index/dates');
+                const data = await resp.json();
+                if (data.count === 0) {
+                    list.innerHTML = '<div style="text-align:center;color:#64748b;font-size:13px;padding:16px;">No snapshots yet</div>';
+                    return;
+                }
+                list.innerHTML = '';
+                // Show newest first
+                [...data.dates].reverse().forEach(d => {
+                    const row = document.createElement('div');
+                    row.className = 'date-row-item';
+                    row.innerHTML = `<span>&#x1F4C5; ${d}</span>
+                        <button class="btn-delete-date" onclick="deleteDate('${d}', this)">&#x1F5D1;&#xFE0F; Delete</button>`;
+                    list.appendChild(row);
+                });
+            } catch {
+                list.innerHTML = '<div style="text-align:center;color:#f87171;font-size:13px;padding:16px;">Failed to load dates</div>';
+            }
+        }
+
+        async function deleteDate(date, btn) {
+            if (!confirm(`Delete snapshot "${date}" from all products? This cannot be undone.`)) return;
+            btn.disabled = true;
+            btn.textContent = '...';
+            try {
+                const resp = await fetch(`/api/akakce/price-index/dates/${date}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    addLog(`Deleted ${date} — ${data.removed} product(s) updated`, 'warning');
+                    btn.closest('.date-row-item').remove();
+                    if (document.getElementById('datesList').children.length === 0)
+                        document.getElementById('datesList').innerHTML =
+                            '<div style="text-align:center;color:#64748b;font-size:13px;padding:16px;">No snapshots yet</div>';
+                } else {
+                    btn.disabled = false;
+                    btn.innerHTML = '&#x1F5D1;&#xFE0F; Delete';
+                    addLog(`Failed to delete ${date}: ${data.message}`, 'error');
+                }
+            } catch {
+                btn.disabled = false;
+                btn.innerHTML = '&#x1F5D1;&#xFE0F; Delete';
+                addLog('Could not reach server', 'error');
+            }
+        }
+
+        function exportDb() {
+            window.location.href = '/api/akakce/price-index/export';
+        }
+
+        let importFile = null;
+        function handleImportFile() {
+            importFile = document.getElementById('importFileInput').files[0];
+            if (!importFile) return;
+            document.getElementById('importFileName').textContent = importFile.name;
+            document.getElementById('importBtn').style.display = 'flex';
+        }
+
+        async function runImport() {
+            if (!importFile) return;
+            if (!confirm('This will replace your entire price history with the imported file. Continue?')) return;
+            const btn = document.getElementById('importBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span>&#x23F3;</span> Importing...';
+            try {
+                const fd = new FormData();
+                fd.append('file', importFile);
+                const resp = await fetch('/api/akakce/price-index/import', { method: 'POST', body: fd });
+                const data = await resp.json();
+                if (resp.ok) {
+                    addLog('Database imported successfully', 'success');
+                    refreshDatesList();
+                    importFile = null;
+                    document.getElementById('importFileInput').value = '';
+                    document.getElementById('importFileName').textContent = '';
+                    btn.style.display = 'none';
+                } else {
+                    addLog(`Import failed: ${data.message}`, 'error');
+                    btn.disabled = false;
+                    btn.innerHTML = '<span>&#x2B06;&#xFE0F;</span> Import &amp; Replace';
+                }
+            } catch {
+                addLog('Could not reach server', 'error');
+                btn.disabled = false;
+                btn.innerHTML = '<span>&#x2B06;&#xFE0F;</span> Import &amp; Replace';
+            }
+        }
+    </script>
+</body>
+</html>

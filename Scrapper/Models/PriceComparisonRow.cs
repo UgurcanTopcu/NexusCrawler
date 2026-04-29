@@ -6,6 +6,51 @@ namespace Scrapper.Models;
 /// </summary>
 public class PriceComparisonRow
 {
+    /// <summary>Offer id from the source Excel.</summary>
+    public string OfferId { get; set; } = string.Empty;
+
+    /// <summary>Focus category from the source Excel.</summary>
+    public string FocusCategory { get; set; } = string.Empty;
+
+    /// <summary>Category label from the source Excel.</summary>
+    public string CategoryLabel { get; set; } = string.Empty;
+
+    /// <summary>GTIN from the source Excel.</summary>
+    public string Gtin { get; set; } = string.Empty;
+
+    /// <summary>Product id from the source Excel.</summary>
+    public string SourceProductId { get; set; } = string.Empty;
+
+    /// <summary>Brand from the source Excel.</summary>
+    public string SourceProductBrand { get; set; } = string.Empty;
+
+    /// <summary>Total active offers from the source Excel.</summary>
+    public string TotalActiveOffers { get; set; } = string.Empty;
+
+    /// <summary>Stock value from the source Excel.</summary>
+    public string SourceStock { get; set; } = string.Empty;
+
+    /// <summary>Winner assortment type from the source Excel.</summary>
+    public string WinnerAssortmentType { get; set; } = string.Empty;
+
+    /// <summary>Offer score rank from the source Excel.</summary>
+    public string OfferScoreRank { get; set; } = string.Empty;
+
+    /// <summary>Seller name from the source Excel.</summary>
+    public string SourceSellerName { get; set; } = string.Empty;
+
+    /// <summary>Sold items metric from the source Excel.</summary>
+    public string ProductSoldItems30d { get; set; } = string.Empty;
+
+    /// <summary>GMV metric from the source Excel.</summary>
+    public string ProductGmvInclShipping30d { get; set; } = string.Empty;
+
+    /// <summary>PDP sessions metric from the source Excel.</summary>
+    public string SessionsByProductWithPdp30d { get; set; } = string.Empty;
+
+    /// <summary>Add to cart sessions metric from the source Excel.</summary>
+    public string SessionsByProductWithAddToCartInPdp30d { get; set; } = string.Empty;
+
     /// <summary>Product name as provided in the input Excel.</summary>
     public string SearchName { get; set; } = string.Empty;
 

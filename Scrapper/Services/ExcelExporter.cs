@@ -45,6 +45,8 @@ public class ExcelExporter
             }
             
             worksheet.Cells[1, col++].Value = "Seller";
+            worksheet.Cells[1, col++].Value = "Source Seller Key";
+            worksheet.Cells[1, col++].Value = "Source URL";
             worksheet.Cells[1, col++].Value = "Category";
             worksheet.Cells[1, col++].Value = "Barcode";
 
@@ -87,7 +89,9 @@ public class ExcelExporter
                         worksheet.Cells[row, column].Value = "";
                         return;
                     }
-                    
+
+                    value = System.Net.WebUtility.HtmlDecode(value);
+
                     if (value.Length > maxLength)
                     {
                         value = value.Substring(0, maxLength - 10) + "...";
@@ -107,6 +111,8 @@ public class ExcelExporter
                 }
                 
                 SafeSetCellValue(col++, product.Seller);
+                SafeSetCellValue(col++, product.SourceCollectionKey);
+                SafeSetCellValue(col++, product.SourceCollectionUrl);
                 SafeSetCellValue(col++, product.Category);
                 SafeSetCellValue(col++, product.Barcode);
 

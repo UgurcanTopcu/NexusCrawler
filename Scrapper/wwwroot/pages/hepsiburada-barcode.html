@@ -184,7 +184,7 @@
     <p>Upload an Excel file with barcodes to check product availability on Hepsiburada</p>
 </div>
 
-<div class="nav-grid">
+<div class="nav-grid" style="grid-template-columns: repeat(5, 1fr);">
     <div class="nav-item" onclick="location.href='/'">
         <h3>🛒 Category Scraper</h3>
         <p>Trendyol & Hepsiburada</p>
@@ -200,6 +200,10 @@
     <div class="nav-item" onclick="location.href='/bulk-image'">
         <h3>🖼️ Image Processing</h3>
         <p>Bulk Resizing</p>
+    </div>
+    <div class="nav-item" onclick="location.href='/price-index'">
+        <h3>📈 Price Index</h3>
+        <p>Daily Price Trends</p>
     </div>
 </div>
 
@@ -223,7 +227,7 @@
                     <div class="info-pills">
                         <div class="pill"><span>📊</span> Column A = Barcodes</div>
                         <div class="pill"><span>🔗</span> Pipe: 123|456</div>
-                        <div class="pill"><span>⚡</span> 5 parallel</div>
+                        <div class="pill"><span>🔎</span> 10 parallel searches</div>
                     </div>
                 </div>
             </div>
@@ -408,7 +412,7 @@
             formData.append('file', file);
             formData.append('sessionId', sessionId);
 
-            addLog('Starting search...', 'info');
+            addLog('Starting barcode search (10 parallel requests)...', 'info');
 
             try {
                 const response = await fetch('/api/hepsiburada-barcode/search', { method: 'POST', body: formData });

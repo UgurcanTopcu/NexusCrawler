@@ -278,6 +278,8 @@ public class TemplateExcelExporter
             return;
         }
 
+        value = System.Net.WebUtility.HtmlDecode(value);
+
         // Limit cell value length to Excel's limit
         const int maxLength = 32767;
         if (value.Length > maxLength)

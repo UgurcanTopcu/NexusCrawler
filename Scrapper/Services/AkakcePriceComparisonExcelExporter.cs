@@ -38,6 +38,27 @@ public class AkakcePriceComparisonExcelExporter
         "Turkcell"
     ];
 
+    private static readonly string[] SourceHeaders =
+    [
+        "Offer Id",
+        "Focus Category",
+        "Category Label",
+        "GTIN",
+        "Product Id",
+        "Product Brand",
+        "Product Name",
+        "Total Active Offers",
+        "Stock",
+        "Winner Assortment Type",
+        "Offer Total Price",
+        "Offer Score Rank",
+        "Seller Name",
+        "Product - Sold items (30d)",
+        "Product - GMV incl. Shipping (30d)",
+        "Sessions by Product with PDP (30d)",
+        "Sessions by Product with Add to Cart in pdp (30d)"
+    ];
+
     public void Export(List<PriceComparisonRow> rows, string filePath)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -166,8 +187,13 @@ public class AkakcePriceComparisonExcelExporter
 
         // ── Header row ────────────────────────────────────────────────────────
         int col = 1;
+        WriteSourceHeaders(ws, 1, col);
+        col += SourceHeaders.Length;
+        int searchNameCol = col;
         ws.Cells[1, col++].Value = "Ürün Adı";
+        int myPriceCol = col;
         ws.Cells[1, col++].Value = "Fiyatım";
+        int akakceNameCol = col;
         ws.Cells[1, col++].Value = "Akakçe Ürün Adı";
 
         int mpStartCol = col;
@@ -193,6 +219,8 @@ public class AkakcePriceComparisonExcelExporter
             bool isAlt = i % 2 == 1;
 
             col = 1;
+            WriteSourceValues(ws, r, col, row);
+            col += SourceHeaders.Length;
             ws.Cells[r, col++].Value = row.SearchName;
             SetPriceCell(ws.Cells[r, col++], row.MyPrice, row.IsStockOut);
             ws.Cells[r, col++].Value = string.IsNullOrEmpty(row.AkakceName) ? row.SearchName : row.AkakceName;
@@ -273,15 +301,15 @@ public class AkakcePriceComparisonExcelExporter
             // Hyperlink on Akakçe name
             if (!string.IsNullOrEmpty(row.AkakceUrl))
             {
-                ws.Cells[r, 3].Hyperlink = new Uri(row.AkakceUrl);
-                ws.Cells[r, 3].Style.Font.UnderLine = true;
-                ws.Cells[r, 3].Style.Font.Color.SetColor(HeaderBlue);
+                ws.Cells[r, akakceNameCol].Hyperlink = new Uri(row.AkakceUrl);
+                ws.Cells[r, akakceNameCol].Style.Font.UnderLine = true;
+                ws.Cells[r, akakceNameCol].Style.Font.Color.SetColor(HeaderBlue);
             }
 
             if (!row.IsSuccess)
             {
-                ws.Cells[r, 1].Style.Font.Color.SetColor(Color.FromArgb(156, 31, 31));
-                ws.Cells[r, 1].Value = $"❌ {row.SearchName}";
+                ws.Cells[r, searchNameCol].Style.Font.Color.SetColor(Color.FromArgb(156, 31, 31));
+                ws.Cells[r, searchNameCol].Value = $"❌ {row.SearchName}";
             }
         }
 
@@ -316,9 +344,13 @@ public class AkakcePriceComparisonExcelExporter
 
         // ?? Build header row ??????????????????????????????????????????????????
         int col = 1;
-        ws.Cells[1, col++].Value = "Ürün Adı";           // A
-        ws.Cells[1, col++].Value = "Fiyatım";             // B – my price
-        ws.Cells[1, col++].Value = "Akakçe Ürün Adı";    // C
+        WriteSourceHeaders(ws, 1, col);
+        col += SourceHeaders.Length;
+        int searchNameCol = col;
+        ws.Cells[1, col++].Value = "Ürün Adı";
+        ws.Cells[1, col++].Value = "Fiyatım";
+        int akakceNameCol = col;
+        ws.Cells[1, col++].Value = "Akakçe Ürün Adı";
 
         int mpStartCol = col;
         foreach (var mp in marketplaces)
@@ -346,6 +378,8 @@ public class AkakcePriceComparisonExcelExporter
             bool isAlt = i % 2 == 1;
 
             col = 1;
+            WriteSourceValues(ws, r, col, row);
+            col += SourceHeaders.Length;
             ws.Cells[r, col++].Value = row.SearchName;
             SetPriceCell(ws.Cells[r, col++], row.MyPrice, row.IsStockOut);
             ws.Cells[r, col++].Value = string.IsNullOrEmpty(row.AkakceName) ? row.SearchName : row.AkakceName;
@@ -406,16 +440,16 @@ public class AkakcePriceComparisonExcelExporter
             // Hyperlink on Akakçe name cell if we have a URL
             if (!string.IsNullOrEmpty(row.AkakceUrl))
             {
-                ws.Cells[r, 3].Hyperlink = new Uri(row.AkakceUrl);
-                ws.Cells[r, 3].Style.Font.UnderLine = true;
-                ws.Cells[r, 3].Style.Font.Color.SetColor(Color.FromArgb(31, 78, 121));
+                ws.Cells[r, akakceNameCol].Hyperlink = new Uri(row.AkakceUrl);
+                ws.Cells[r, akakceNameCol].Style.Font.UnderLine = true;
+                ws.Cells[r, akakceNameCol].Style.Font.Color.SetColor(Color.FromArgb(31, 78, 121));
             }
 
             // Error row highlight
             if (!row.IsSuccess)
             {
-                ws.Cells[r, 1].Style.Font.Color.SetColor(Color.FromArgb(156, 31, 31));
-                ws.Cells[r, 1].Value = $"? {row.SearchName}";
+                ws.Cells[r, searchNameCol].Style.Font.Color.SetColor(Color.FromArgb(156, 31, 31));
+                ws.Cells[r, searchNameCol].Value = $"? {row.SearchName}";
             }
         }
 
@@ -441,7 +475,9 @@ public class AkakcePriceComparisonExcelExporter
     {
         var ws = package.Workbook.Worksheets.Add("Raw Data");
 
-        var headers = new[] { "Ürün Adı", "Fiyatım", "Stock Out", "Akakçe Ürün Adı", "Marketplace", "En İyi Fiyat (Marketplace)", "En İyi Fiyat (Genel)", "Delta %", "Akakçe URL", "Durum" };
+        var headers = SourceHeaders
+            .Concat(["Ürün Adı", "Fiyatım", "Stock Out", "Akakçe Ürün Adı", "Marketplace", "En İyi Fiyat (Marketplace)", "En İyi Fiyat (Genel)", "Delta %", "Akakçe URL", "Durum"])
+            .ToArray();
         for (int c2 = 0; c2 < headers.Length; c2++)
             ws.Cells[1, c2 + 1].Value = headers[c2];
 
@@ -476,34 +512,41 @@ public class AkakcePriceComparisonExcelExporter
 
     private static void WriteRawRow(ExcelWorksheet ws, int row, PriceComparisonRow r, string? mp, decimal? mpPrice)
     {
-        ws.Cells[row, 1].Value = r.SearchName;
-        SetPriceCell(ws.Cells[row, 2], r.MyPrice, r.IsStockOut);
-        ws.Cells[row, 3].Value = r.IsStockOut ? "Yes" : "No";
-        ws.Cells[row, 4].Value = string.IsNullOrEmpty(r.AkakceName) ? r.SearchName : r.AkakceName;
-        ws.Cells[row, 5].Value = mp ?? "-";
+        int col = 1;
+        WriteSourceValues(ws, row, col, r);
+        col += SourceHeaders.Length;
+
+        ws.Cells[row, col++].Value = r.SearchName;
+        SetPriceCell(ws.Cells[row, col++], r.MyPrice, r.IsStockOut);
+        ws.Cells[row, col++].Value = r.IsStockOut ? "Yes" : "No";
+        ws.Cells[row, col++].Value = string.IsNullOrEmpty(r.AkakceName) ? r.SearchName : r.AkakceName;
+        ws.Cells[row, col++].Value = mp ?? "-";
 
         if (mpPrice.HasValue)
-            SetNumericPriceCell(ws.Cells[row, 6], mpPrice.Value);
+            SetNumericPriceCell(ws.Cells[row, col], mpPrice.Value);
         else
-            ws.Cells[row, 6].Value = "-";
+            ws.Cells[row, col].Value = "-";
+        col++;
 
         if (r.BestPrice > 0)
-            SetNumericPriceCell(ws.Cells[row, 7], r.BestPrice);
+            SetNumericPriceCell(ws.Cells[row, col], r.BestPrice);
         else
-            ws.Cells[row, 7].Value = "-";
+            ws.Cells[row, col].Value = "-";
+        col++;
 
         if (r.DeltaPercent.HasValue)
         {
-            ws.Cells[row, 8].Value = r.DeltaPercent.Value / 100;
-            ws.Cells[row, 8].Style.Numberformat.Format = "+0.00%;-0.00%;0.00%";
+            ws.Cells[row, col].Value = r.DeltaPercent.Value / 100;
+            ws.Cells[row, col].Style.Numberformat.Format = "+0.00%;-0.00%;0.00%";
         }
         else
         {
-            ws.Cells[row, 8].Value = r.IsStockOut ? "Stock Out" : "-";
+            ws.Cells[row, col].Value = r.IsStockOut ? "Stock Out" : "-";
         }
+        col++;
 
-        ws.Cells[row, 9].Value = r.AkakceUrl;
-        ws.Cells[row, 10].Value = r.IsSuccess ? "OK" : $"Error: {r.ErrorMessage}";
+        ws.Cells[row, col++].Value = r.AkakceUrl;
+        ws.Cells[row, col].Value = r.IsSuccess ? "OK" : $"Error: {r.ErrorMessage}";
     }
 
     // ??????????????????????????????????????????????????????????????????????????
@@ -518,6 +561,35 @@ public class AkakcePriceComparisonExcelExporter
         range.Style.Fill.BackgroundColor.SetColor(bgColor);
         range.Style.Border.BorderAround(ExcelBorderStyle.Thin);
         range.Style.HorizontalAlignment = ExcelHorizontalAlignment.Center;
+    }
+
+    private static void WriteSourceHeaders(ExcelWorksheet worksheet, int row, int startColumn)
+    {
+        for (int i = 0; i < SourceHeaders.Length; i++)
+        {
+            worksheet.Cells[row, startColumn + i].Value = SourceHeaders[i];
+        }
+    }
+
+    private static void WriteSourceValues(ExcelWorksheet worksheet, int row, int startColumn, PriceComparisonRow sourceRow)
+    {
+        worksheet.Cells[row, startColumn + 0].Value = sourceRow.OfferId;
+        worksheet.Cells[row, startColumn + 1].Value = sourceRow.FocusCategory;
+        worksheet.Cells[row, startColumn + 2].Value = sourceRow.CategoryLabel;
+        worksheet.Cells[row, startColumn + 3].Value = sourceRow.Gtin;
+        worksheet.Cells[row, startColumn + 4].Value = sourceRow.SourceProductId;
+        worksheet.Cells[row, startColumn + 5].Value = sourceRow.SourceProductBrand;
+        worksheet.Cells[row, startColumn + 6].Value = sourceRow.SearchName;
+        worksheet.Cells[row, startColumn + 7].Value = sourceRow.TotalActiveOffers;
+        worksheet.Cells[row, startColumn + 8].Value = sourceRow.SourceStock;
+        worksheet.Cells[row, startColumn + 9].Value = sourceRow.WinnerAssortmentType;
+        SetPriceCell(worksheet.Cells[row, startColumn + 10], sourceRow.MyPrice, sourceRow.IsStockOut);
+        worksheet.Cells[row, startColumn + 11].Value = sourceRow.OfferScoreRank;
+        worksheet.Cells[row, startColumn + 12].Value = sourceRow.SourceSellerName;
+        worksheet.Cells[row, startColumn + 13].Value = sourceRow.ProductSoldItems30d;
+        worksheet.Cells[row, startColumn + 14].Value = sourceRow.ProductGmvInclShipping30d;
+        worksheet.Cells[row, startColumn + 15].Value = sourceRow.SessionsByProductWithPdp30d;
+        worksheet.Cells[row, startColumn + 16].Value = sourceRow.SessionsByProductWithAddToCartInPdp30d;
     }
 
     private static void SetPriceCell(ExcelRange cell, decimal price, bool isStockOut)

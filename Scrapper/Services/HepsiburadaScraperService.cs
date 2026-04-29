@@ -158,6 +158,8 @@ public class HepsiburadaScraperService
                             return;
                         }
 
+                        ApplySourceCollectionMetadata(product, categoryUrl);
+
                         var displayNameSuccess = !string.IsNullOrEmpty(product.Name) && product.Name.Length > 50
                             ? product.Name.Substring(0, 50) + "..."
                             : product.Name ?? "Unknown Product";
@@ -290,6 +292,275 @@ public class HepsiburadaScraperService
     }
 
     /// <summary>
+    /// Scrapes multiple category URLs and combines all products into a single Excel file.
+    /// </summary>
+    public async Task ScrapeMultipleWithProgressAsync(
+        string[] categoryUrls,
+        int maxProducts,
+        bool excludePrice,
+        ScrapeMethod scrapeMethod,
+        bool processImages,
+        Func<int, string, string, Task> onProgress,
+        string? sessionId = null)
+    {
+        var cts = new CancellationTokenSource();
+        if (!string.IsNullOrEmpty(sessionId))
+            _sessions[sessionId] = cts;
+
+        // Scrape.do plan limit: max 10 concurrent requests total.
+        // 10 parallel URLs × 1 product at a time = exactly 10 concurrent.
+        int maxUrlParallel     = scrapeMethod == ScrapeMethod.ScrapeDo ? 10 : 1;
+        int productConcurrency = 1; // always 1 — URL-level parallelism already saturates the 10-request limit
+        var resultsBag         = new ConcurrentBag<(int Index, List<ProductInfo> Products)>();
+        var completedUrls      = 0;
+        using var progressLock = new SemaphoreSlim(1, 1);
+
+        try
+        {
+            await onProgress(2,
+                $"?? Batch scrape — {categoryUrls.Length} URL(s), {maxUrlParallel} parallel",
+                "info");
+
+            await Parallel.ForEachAsync(
+                categoryUrls.Select((url, i) => (url, i)),
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = maxUrlParallel,
+                    CancellationToken      = cts.Token
+                },
+                async (item, _) =>
+                {
+                    var (url, urlIndex) = item;
+
+                    Func<int, string, string, Task> inner = async (_, msg, type) =>
+                    {
+                        if (type == "complete") return;
+                        var pct = 5 + Volatile.Read(ref completedUrls) * 85 / categoryUrls.Length;
+                        await progressLock.WaitAsync(CancellationToken.None);
+                        try   { await onProgress(pct, msg, type); }
+                        finally { progressLock.Release(); }
+                    };
+
+                    var urlProducts = await ScrapeUrlToProductsAsync(
+                        url, maxProducts, scrapeMethod, processImages, inner, cts, productConcurrency);
+
+                    resultsBag.Add((urlIndex, urlProducts));
+
+                    var current  = Interlocked.Increment(ref completedUrls);
+                    var progress = 5 + current * 85 / categoryUrls.Length;
+                    var shortUrl = url.Length > 70 ? url[..70] + "…" : url;
+
+                    await progressLock.WaitAsync(CancellationToken.None);
+                    try
+                    {
+                        await onProgress(progress,
+                            $"? [{current}/{categoryUrls.Length}] {shortUrl}: {urlProducts.Count} products",
+                            "success");
+                    }
+                    finally { progressLock.Release(); }
+                });
+
+            var allProducts = resultsBag
+                .OrderBy(x => x.Index)
+                .SelectMany(x => x.Products)
+                .ToList();
+
+            if (allProducts.Count > 0)
+            {
+                await onProgress(92, $"?? Creating combined Excel for {allProducts.Count} products...", "info");
+
+                var ts       = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var fileName = $"Hepsiburada_Combined_{categoryUrls.Length}URLs_{ts}.xlsx";
+                var filePath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
+
+                try
+                {
+                    new ExcelExporter().ExportToExcel(allProducts, filePath, excludePrice, processImages);
+                    await onProgress(100,
+                        $"? Done! {allProducts.Count} products combined from {categoryUrls.Length} URL(s)", "success");
+                    await SendComplete(onProgress, fileName, allProducts.Count);
+                }
+                catch (Exception excelEx)
+                {
+                    await onProgress(100, $"Excel error: {excelEx.Message}", "error");
+                    await SendComplete(onProgress, null, null);
+                }
+            }
+            else
+            {
+                await onProgress(100, "No products found across all URLs", "error");
+                await SendComplete(onProgress, null, null);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            var partial = resultsBag.OrderBy(x => x.Index).SelectMany(x => x.Products).ToList();
+            if (partial.Count > 0)
+            {
+                var ts          = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var partialName = $"Hepsiburada_Combined_Partial_{ts}.xlsx";
+                new ExcelExporter().ExportToExcel(partial,
+                    Path.Combine(Directory.GetCurrentDirectory(), partialName), excludePrice, processImages);
+                await onProgress(100, $"? Stopped — saved {partial.Count} products collected so far", "warning");
+                await SendComplete(onProgress, partialName, partial.Count);
+            }
+            else
+            {
+                await onProgress(100, "? Stopped by user — no products collected", "warning");
+                await SendComplete(onProgress, null, null);
+            }
+        }
+        catch (Exception ex)
+        {
+            var partial = resultsBag.OrderBy(x => x.Index).SelectMany(x => x.Products).ToList();
+            if (partial.Count > 0)
+            {
+                var ts          = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var partialName = $"Hepsiburada_Combined_Partial_{ts}.xlsx";
+                new ExcelExporter().ExportToExcel(partial,
+                    Path.Combine(Directory.GetCurrentDirectory(), partialName), excludePrice, processImages);
+                await onProgress(100, $"?? Error — saved {partial.Count} products collected so far", "warning");
+                await SendComplete(onProgress, partialName, partial.Count);
+            }
+            else
+            {
+                await onProgress(100, $"? Error: {ex.Message}", "error");
+                await SendComplete(onProgress, null, null);
+            }
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(sessionId))
+                _sessions.TryRemove(sessionId, out _);
+            cts.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Scrapes a single category URL and returns the collected products without exporting.
+    /// Uses the same parallel scraper-pool approach as the single-URL method.
+    /// </summary>
+    private static async Task<List<ProductInfo>> ScrapeUrlToProductsAsync(
+        string categoryUrl,
+        int maxProducts,
+        ScrapeMethod scrapeMethod,
+        bool processImages,
+        Func<int, string, string, Task> onProgress,
+        CancellationTokenSource cts,
+        int maxProductConcurrency = 4)
+    {
+        var productResults = new ConcurrentDictionary<int, ProductInfo>();
+
+        try
+        {
+            var linkScraper = new HepsiburadaScraper { Method = scrapeMethod };
+            var productLinks = await linkScraper.GetProductLinksAsync(categoryUrl, maxProducts, onProgress);
+            linkScraper.Dispose();
+
+            if (productLinks.Count == 0) return [];
+
+            var toProcess = productLinks.Take(maxProducts).ToList();
+            await onProgress(10, $"Found {toProcess.Count} products", "info");
+
+            const int staggerDelayMs = 1500;
+            var maxConcurrency = maxProductConcurrency;
+
+            var scraperPool  = new ConcurrentBag<HepsiburadaScraper>();
+            var poolScrapers = new List<HepsiburadaScraper>();
+            var poolLock     = new object();
+            for (int j = 0; j < maxConcurrency; j++)
+            {
+                var s = new HepsiburadaScraper { Method = scrapeMethod };
+                scraperPool.Add(s);
+                poolScrapers.Add(s);
+            }
+
+            WsrvImageService? imageService = processImages ? new WsrvImageService() : null;
+
+            using var semaphore = new SemaphoreSlim(maxConcurrency);
+            using var throttle  = new SemaphoreSlim(1, 1);
+            int completedCount = 0;
+
+            try
+            {
+                var tasks = toProcess.Select(async (link, index) =>
+                {
+                    try { await semaphore.WaitAsync(cts.Token); }
+                    catch (OperationCanceledException) { return; }
+
+                    try
+                    {
+                        if (cts.Token.IsCancellationRequested) return;
+
+                        await throttle.WaitAsync(cts.Token);
+                        try { await Task.Delay(staggerDelayMs, cts.Token); }
+                        finally { throttle.Release(); }
+
+                        if (cts.Token.IsCancellationRequested) return;
+
+                        scraperPool.TryTake(out var poolScraper);
+                        ProductInfo? product = null;
+                        bool failed = false;
+                        try { product = await poolScraper!.GetProductDetailsAsync(link); if (product == null) failed = true; }
+                        catch { failed = true; }
+
+                        if (failed)
+                        {
+                            try { poolScraper!.Dispose(); } catch { }
+                            var replacement = new HepsiburadaScraper { Method = scrapeMethod };
+                            scraperPool.Add(replacement);
+                            lock (poolLock) { poolScrapers.Add(replacement); }
+                        }
+                        else
+                        {
+                            scraperPool.Add(poolScraper!);
+                        }
+
+                        int current;
+                        lock (poolLock) { current = ++completedCount; }
+                        var pct = 10 + (int)(current / (double)toProcess.Count * 80);
+
+                        if (product == null || string.IsNullOrWhiteSpace(product.Barcode)) return;
+
+                        ApplySourceCollectionMetadata(product, categoryUrl);
+
+                        if (processImages && imageService != null)
+                        {
+                            try
+                            {
+                                var (main, extra) = await imageService.ProcessProductImagesAsync(
+                                    product, async (msg) => await onProgress(pct, msg, "info"));
+                                if (!string.IsNullOrEmpty(main)) product.CdnImageUrl = main;
+                                product.CdnAdditionalImages = extra;
+                            }
+                            catch { }
+                        }
+
+                        var name = product.Name?.Length > 50 ? product.Name[..50] + "…" : product.Name ?? "Unknown";
+                        await onProgress(pct, $"Scraped: {name}", "success");
+                        productResults[index] = product;
+                    }
+                    catch (OperationCanceledException) { }
+                    finally { semaphore.Release(); }
+                }).ToList();
+
+                await Task.WhenAll(tasks);
+            }
+            finally
+            {
+                foreach (var s in poolScrapers) s.Dispose();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            await onProgress(0, $"Error scraping {categoryUrl}: {ex.Message}", "error");
+        }
+
+        return productResults.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList();
+    }
+
+    /// <summary>
     /// Extracts a meaningful name from Hepsiburada URLs for file naming.
     /// Shop URL: https://www.hepsiburada.com/magaza/avfoni?tab=allproducts -> "avfoni"
     /// Category URL: https://www.hepsiburada.com/elektrikli-ev-aletleri-ankastre-setler-c-234329 -> "ankastre-setler"
@@ -321,7 +592,7 @@ public class HepsiburadaScraperService
                     return SanitizeFileName(searchTerm);
                 }
             }
-            
+
             // Category URL: /some-category-name-c-123456 or /some-category-name
             // Extract the meaningful part before "-c-" or just the last segment
             var segments = path.Split('/');
@@ -340,6 +611,38 @@ public class HepsiburadaScraperService
         catch
         {
             return "Products";
+        }
+    }
+
+    private static void ApplySourceCollectionMetadata(ProductInfo product, string categoryUrl)
+    {
+        ArgumentNullException.ThrowIfNull(product);
+
+        if (string.IsNullOrWhiteSpace(categoryUrl))
+            return;
+
+        product.SourceCollectionUrl = categoryUrl;
+        product.SourceCollectionKey = ExtractSourceCollectionKey(categoryUrl);
+
+        if (string.IsNullOrWhiteSpace(product.Seller) && !string.IsNullOrWhiteSpace(product.SourceCollectionKey))
+            product.Seller = product.SourceCollectionKey;
+    }
+
+    private static string ExtractSourceCollectionKey(string url)
+    {
+        try
+        {
+            var uri = new Uri(url.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? url : "https://" + url);
+            var path = uri.AbsolutePath.Trim('/');
+
+            if (path.StartsWith("magaza/", StringComparison.OrdinalIgnoreCase))
+                return path.Substring("magaza/".Length).Split('/')[0];
+
+            return ExtractNameFromUrl(url);
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
     

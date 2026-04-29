@@ -92,6 +92,8 @@ public class TrendyolScraperService
                         continue;
                     }
 
+                    ApplySourceCollectionMetadata(product, categoryUrl);
+
                     var displayNameSuccess = !string.IsNullOrEmpty(product.Name) && product.Name.Length > 50
                         ? product.Name.Substring(0, 50) + "..."
                         : product.Name ?? "Unknown Product";
@@ -228,6 +230,232 @@ public class TrendyolScraperService
         }
     }
 
+    /// <summary>
+    /// Scrapes multiple category URLs and combines all products into a single Excel file.
+    /// </summary>
+    public async Task ScrapeMultipleWithProgressAsync(
+        string[] categoryUrls,
+        int maxProducts,
+        bool excludePrice,
+        ScrapeMethod scrapeMethod,
+        bool processImages,
+        string? templateName,
+        Func<int, string, string, Task> onProgress,
+        string? sessionId = null)
+    {
+        var cts = new CancellationTokenSource();
+        if (!string.IsNullOrEmpty(sessionId))
+            _sessions[sessionId] = cts;
+
+        // Scrape.do: 10 URLs concurrently; Selenium: 1 (shared browser instance)
+        int maxUrlParallel     = scrapeMethod == ScrapeMethod.ScrapeDo ? 10 : 1;
+        var resultsBag         = new ConcurrentBag<(int Index, List<ProductInfo> Products)>();
+        var completedUrls      = 0;
+        using var progressLock = new SemaphoreSlim(1, 1);
+
+        try
+        {
+            await onProgress(2,
+                $"🚀 Batch scrape — {categoryUrls.Length} URL(s), {maxUrlParallel} parallel",
+                "info");
+
+            await Parallel.ForEachAsync(
+                categoryUrls.Select((url, i) => (url, i)),
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = maxUrlParallel,
+                    CancellationToken      = cts.Token
+                },
+                async (item, _) =>
+                {
+                    var (url, urlIndex) = item;
+
+                    // Inner progress: log messages while driving the bar by URL completion count
+                    Func<int, string, string, Task> inner = async (_, msg, type) =>
+                    {
+                        if (type == "complete") return;
+                        var pct = 5 + Volatile.Read(ref completedUrls) * 85 / categoryUrls.Length;
+                        await progressLock.WaitAsync(CancellationToken.None);
+                        try   { await onProgress(pct, msg, type); }
+                        finally { progressLock.Release(); }
+                    };
+
+                    var urlProducts = await ScrapeUrlToProductsAsync(
+                        url, maxProducts, scrapeMethod, processImages, inner, cts);
+
+                    resultsBag.Add((urlIndex, urlProducts));
+
+                    var current  = Interlocked.Increment(ref completedUrls);
+                    var progress = 5 + current * 85 / categoryUrls.Length;
+                    var shortUrl = url.Length > 70 ? url[..70] + "…" : url;
+
+                    await progressLock.WaitAsync(CancellationToken.None);
+                    try
+                    {
+                        await onProgress(progress,
+                            $"✅ [{current}/{categoryUrls.Length}] {shortUrl}: {urlProducts.Count} products",
+                            "success");
+                    }
+                    finally { progressLock.Release(); }
+                });
+
+            // Reconstruct in original URL order so Excel rows are predictable
+            var allProducts = resultsBag
+                .OrderBy(x => x.Index)
+                .SelectMany(x => x.Products)
+                .ToList();
+
+            if (allProducts.Count > 0)
+            {
+                await onProgress(92, $"📊 Creating combined Excel for {allProducts.Count} products...", "info");
+
+                var ts       = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var fileName = $"Trendyol_Combined_{categoryUrls.Length}URLs_{ts}.xlsx";
+                var filePath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
+
+                try
+                {
+                    if (!string.IsNullOrEmpty(templateName))
+                    {
+                        var tmplSvc = new TemplateService();
+                        var tmpl    = tmplSvc.GetTemplate(templateName);
+                        if (tmpl != null)
+                            new TemplateExcelExporter().ExportWithTemplate(allProducts, filePath, tmpl, processImages);
+                        else
+                            new ExcelExporter().ExportToExcel(allProducts, filePath, excludePrice, processImages);
+                    }
+                    else
+                    {
+                        new ExcelExporter().ExportToExcel(allProducts, filePath, excludePrice, processImages);
+                    }
+
+                    await onProgress(100,
+                        $"✅ Done! {allProducts.Count} products combined from {categoryUrls.Length} URL(s)", "success");
+                    await SendComplete(onProgress, fileName, allProducts.Count);
+                }
+                catch (Exception excelEx)
+                {
+                    await onProgress(100, $"Excel error: {excelEx.Message}", "error");
+                    await SendComplete(onProgress, null, null);
+                }
+            }
+            else
+            {
+                await onProgress(100, "No products found across all URLs", "error");
+                await SendComplete(onProgress, null, null);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            var partial = resultsBag.OrderBy(x => x.Index).SelectMany(x => x.Products).ToList();
+            if (partial.Count > 0)
+            {
+                var ts          = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var partialName = $"Trendyol_Combined_Partial_{ts}.xlsx";
+                new ExcelExporter().ExportToExcel(partial,
+                    Path.Combine(Directory.GetCurrentDirectory(), partialName), excludePrice, processImages);
+                await onProgress(100, $"⛔ Stopped — saved {partial.Count} products collected so far", "warning");
+                await SendComplete(onProgress, partialName, partial.Count);
+            }
+            else
+            {
+                await onProgress(100, "⛔ Stopped by user — no products collected", "warning");
+                await SendComplete(onProgress, null, null);
+            }
+        }
+        catch (Exception ex)
+        {
+            var partial = resultsBag.OrderBy(x => x.Index).SelectMany(x => x.Products).ToList();
+            if (partial.Count > 0)
+            {
+                var ts          = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var partialName = $"Trendyol_Combined_Partial_{ts}.xlsx";
+                new ExcelExporter().ExportToExcel(partial,
+                    Path.Combine(Directory.GetCurrentDirectory(), partialName), excludePrice, processImages);
+                await onProgress(100, $"⚠️ Error — saved {partial.Count} products collected so far", "warning");
+                await SendComplete(onProgress, partialName, partial.Count);
+            }
+            else
+            {
+                await onProgress(100, $"❌ Error: {ex.Message}", "error");
+                await SendComplete(onProgress, null, null);
+            }
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(sessionId))
+                _sessions.TryRemove(sessionId, out _);
+            cts.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Scrapes a single category URL and returns the collected products without exporting.
+    /// </summary>
+    private static async Task<List<ProductInfo>> ScrapeUrlToProductsAsync(
+        string categoryUrl,
+        int maxProducts,
+        ScrapeMethod scrapeMethod,
+        bool processImages,
+        Func<int, string, string, Task> onProgress,
+        CancellationTokenSource cts)
+    {
+        var products = new List<ProductInfo>();
+
+        try
+        {
+            using var scraper = new TrendyolScraper();
+            scraper.Method = scrapeMethod;
+
+            var productLinks = await scraper.GetProductLinksAsync(categoryUrl, maxProducts, onProgress);
+            if (productLinks.Count == 0) return products;
+
+            var toProcess        = productLinks.Take(maxProducts).ToList();
+            var progressPerItem  = 80.0 / toProcess.Count;
+            var currentProgress  = 10.0;
+
+            WsrvImageService? imageService = processImages ? new WsrvImageService() : null;
+
+            for (int i = 0; i < toProcess.Count; i++)
+            {
+                if (cts.Token.IsCancellationRequested) break;
+
+                var product = await scraper.GetProductDetailsAsync(toProcess[i]);
+
+                if (product != null && !string.IsNullOrWhiteSpace(product.Barcode))
+                {
+                    ApplySourceCollectionMetadata(product, categoryUrl);
+
+                    if (processImages && imageService != null)
+                    {
+                        try
+                        {
+                            var (main, extra) = await imageService.ProcessProductImagesAsync(
+                                product, async (msg) => await onProgress((int)currentProgress, msg, "info"));
+                            if (!string.IsNullOrEmpty(main)) product.CdnImageUrl = main;
+                            product.CdnAdditionalImages = extra;
+                        }
+                        catch { }
+                    }
+
+                    var name = product.Name?.Length > 50 ? product.Name[..50] + "…" : product.Name ?? "Unknown";
+                    await onProgress((int)currentProgress, $"Scraped: {name}", "success");
+                    products.Add(product);
+                }
+
+                currentProgress += progressPerItem;
+                await Task.Delay(200);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            await onProgress(0, $"Error scraping {categoryUrl}: {ex.Message}", "error");
+        }
+
+        return products;
+    }
+
     private static string ExtractUrlSlug(string url)
     {
         try
@@ -251,6 +479,44 @@ public class TrendyolScraperService
         catch
         {
             return "products";
+        }
+    }
+
+    private static void ApplySourceCollectionMetadata(ProductInfo product, string categoryUrl)
+    {
+        ArgumentNullException.ThrowIfNull(product);
+
+        if (string.IsNullOrWhiteSpace(categoryUrl))
+            return;
+
+        product.SourceCollectionUrl = categoryUrl;
+        product.SourceCollectionKey = ExtractSourceCollectionKey(categoryUrl);
+
+        if (string.IsNullOrWhiteSpace(product.Seller) && !string.IsNullOrWhiteSpace(product.SourceCollectionKey))
+            product.Seller = product.SourceCollectionKey;
+    }
+
+    private static string ExtractSourceCollectionKey(string url)
+    {
+        try
+        {
+            var uri = new Uri(url.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? url : "https://" + url);
+            var queryParts = uri.Query.TrimStart('?')
+                .Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            foreach (var queryPart in queryParts)
+            {
+                if (!queryPart.StartsWith("mid=", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                return Uri.UnescapeDataString(queryPart[4..]);
+            }
+
+            return ExtractUrlSlug(url);
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 

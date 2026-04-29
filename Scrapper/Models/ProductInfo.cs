@@ -37,6 +37,8 @@ public class ProductInfo
     public string CategoryNameHierarchy { get; set; } = string.Empty;
 
     public string Seller { get; set; } = string.Empty;
+    public string SourceCollectionKey { get; set; } = string.Empty;
+    public string SourceCollectionUrl { get; set; } = string.Empty;
     public string Barcode { get; set; } = string.Empty;
 
     // Product Attributes (�ne ��kan �zellikler)

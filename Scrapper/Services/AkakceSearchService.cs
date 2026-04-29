@@ -82,7 +82,6 @@ public class AkakceSearchService
                     await onProgress((int)currentProgress, $"🔗 Connection health check... ({i} products processed)", "info");
                     try
                     {
-                        // Try a simple operation to verify connection is still alive
                         var testUrl = scraper.GetType().GetProperty("Method")?.GetValue(scraper);
                         Console.WriteLine($"[AkakceSearch] Connection OK at product {i}");
                     }
@@ -259,7 +258,7 @@ public class AkakceSearchService
             var rowCount = worksheet.Dimension?.Rows ?? 0;
             int startRow = 1;
             var firstCell = worksheet.Cells[1, 1].Value?.ToString()?.Trim() ?? "";
-            
+
             if (firstCell.Equals("Product Name", StringComparison.OrdinalIgnoreCase) ||
                 firstCell.Equals("Ürün Adı", StringComparison.OrdinalIgnoreCase) ||
                 firstCell.Equals("Name", StringComparison.OrdinalIgnoreCase) ||

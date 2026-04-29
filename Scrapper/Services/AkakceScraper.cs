@@ -51,20 +51,24 @@ public class AkakceScraper : IDisposable
 
     
     
-    // Delay settings - INCREASED for bulk searches (2000+ products)
-    private const int MIN_DELAY_SEARCH = 2;
-    private const int MAX_DELAY_SEARCH = 4;
+    // Delay settings
+    private const int MIN_DELAY_SEARCH = 3;
+    private const int MAX_DELAY_SEARCH = 6;
     
     // Minimum delay between product page loads (in seconds)
-    private const int MIN_DELAY_BETWEEN_PRODUCTS = 2;
-    private const int MAX_DELAY_BETWEEN_PRODUCTS = 4;
+    private const int MIN_DELAY_BETWEEN_PRODUCTS = 3;
+    private const int MAX_DELAY_BETWEEN_PRODUCTS = 6;
     
     // Cloudflare mode delays (only used when Cloudflare is detected)
-    private const int MIN_DELAY_CLOUDFLARE = 5;
-    private const int MAX_DELAY_CLOUDFLARE = 10;
+    private const int MIN_DELAY_CLOUDFLARE = 8;
+    private const int MAX_DELAY_CLOUDFLARE = 15;
     
-    // Cloudflare wait timeout (seconds)
-    private const int CLOUDFLARE_WAIT_TIMEOUT = 30;
+    // How long to pause after a Cloudflare hit before the next request
+    private const int CLOUDFLARE_COOLDOWN_MIN = 10;
+    private const int CLOUDFLARE_COOLDOWN_MAX = 20;
+    
+    // Cloudflare wait timeout (seconds) — give it a brief chance, then skip
+    private const int CLOUDFLARE_WAIT_TIMEOUT = 5;
     
     // User agent rotation list - realistic Edge versions
     private static readonly string[] UserAgents = new[]
@@ -226,30 +230,28 @@ public class AkakceScraper : IDisposable
             
             if (!connected)
             {
-                // Show setup instructions
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                
+                // Fallback: start our own Edge instance from the scraper profile
                 if (onProgress != null)
+                    await onProgress(6, "?? No debug-port Edge found — starting Edge automatically...", "info");
+                
+                try
                 {
-                    await onProgress(10, "? Setup required - see console for instructions", "error");
+                    CopyProfileForScraper();
+                    InitializeDriver();
+                    connected = IsDriverAlive();
                 }
+                catch (Exception startEx)
+                {
+                    if (onProgress != null)
+                        await onProgress(10, $"? Could not start Edge: {startEx.Message}", "error");
+                    return false;
+                }
+            }
+            
+            if (!connected)
+            {
+                if (onProgress != null)
+                    await onProgress(10, "? Could not connect to or start Edge browser", "error");
                 return false;
             }
             
@@ -740,7 +742,7 @@ public class AkakceScraper : IDisposable
     /// Wait for Cloudflare challenge to complete with human behavior simulation
     /// REDUCED timeout for bulk searches - was 90s, now 15s to avoid wasting time
     /// </summary>
-    private async Task<bool> WaitForCloudflareWithHumanBehavior(int maxWaitSeconds = 15)
+    private async Task<bool> WaitForCloudflareWithHumanBehavior(int maxWaitSeconds = 5)
     {
         if (_driver == null) return false;
         
@@ -823,7 +825,7 @@ public class AkakceScraper : IDisposable
     /// <summary>
     /// Navigate to URL with retry logic and human behavior
     /// </summary>
-    private async Task<bool> NavigateWithRetry(string url, int maxRetries = 3)
+    private async Task<bool> NavigateWithRetry(string url, int maxRetries = 2)
     {
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
@@ -866,6 +868,9 @@ public class AkakceScraper : IDisposable
                     _productsScrapedSinceLastChallenge++;
                     return true;
                 }
+
+                // Cloudflare wasn't resolved — don't waste time retrying, move on
+                return false;
             }
             catch (WebDriverTimeoutException)
             {
@@ -908,12 +913,19 @@ public class AkakceScraper : IDisposable
                 }
             }
 
-            // Short delay before search
-            var preSearchDelay = _random.Next(MIN_DELAY_SEARCH, MAX_DELAY_SEARCH);
+            // Short delay before search — longer if Cloudflare has been seen recently
+            var preSearchDelay = _cloudflareDetected
+                ? _random.Next(MIN_DELAY_CLOUDFLARE, MAX_DELAY_CLOUDFLARE)
+                : _random.Next(MIN_DELAY_SEARCH, MAX_DELAY_SEARCH);
             await Task.Delay(preSearchDelay * 1000);
-            
-            // URL encode the product name for search
-            var encodedQuery = System.Net.WebUtility.UrlEncode(productName.Trim());
+
+            // Strip the first word (brand) — search without it for better Akakce results.
+            // The full productName is still used for accessory filtering.
+            var trimmedName = productName.Trim();
+            var firstSpace = trimmedName.IndexOf(' ');
+            var searchQuery = firstSpace > 0 ? trimmedName[(firstSpace + 1)..] : trimmedName;
+
+            var encodedQuery = System.Net.WebUtility.UrlEncode(searchQuery);
             var searchUrl = $"https://www.akakce.com/arama/?q={encodedQuery}";
 
             
@@ -940,16 +952,11 @@ public class AkakceScraper : IDisposable
             
             if (isCloudflare)
             {
-                Console.WriteLine($"[AkakceSearch] Cloudflare detected for '{productName}' - waiting for it to pass...");
+                Console.WriteLine($"[AkakceSearch] Cloudflare detected for '{productName}' — cooling down before skipping");
                 _cloudflareDetected = true;
-                var cfPassed = await WaitForCloudflareWithHumanBehavior(CLOUDFLARE_WAIT_TIMEOUT);
-                if (!cfPassed)
-                {
-                    Console.WriteLine($"[AkakceSearch] Cloudflare timeout for '{productName}' - skipping");
-                    return null;
-                }
-                Console.WriteLine($"[AkakceSearch] Cloudflare passed for '{productName}'");
-                try { pageSource = _driver.PageSource ?? ""; } catch { }
+                // Pause before returning so the next request doesn't immediately get blocked too
+                await Task.Delay(_random.Next(CLOUDFLARE_COOLDOWN_MIN, CLOUDFLARE_COOLDOWN_MAX) * 1000);
+                return null;
             }
             
             // Check if we were redirected directly to a product page
@@ -959,75 +966,252 @@ public class AkakceScraper : IDisposable
                 return currentUrl;
             }
             
-            // Extract first product URL from search results
+            // Extract all search result items (title + URL) and pick the best match
             var jsExecutor = (IJavaScriptExecutor)_driver;
 
-            
             // Scroll to load lazy content
             jsExecutor.ExecuteScript("window.scrollTo(0, 300);");
             await RandomDelay(500, 1000);
-            
-            var firstProductUrl = jsExecutor.ExecuteScript(@"
-                // Method 1: Look for product links in search results list
-                var productList = document.querySelector('ul#CPL') || 
+
+            var searchResultsRaw = jsExecutor.ExecuteScript(@"
+                var results = [];
+
+                var productList = document.querySelector('ul#CPL') ||
                                  document.querySelector('ul.pl_v9.qv_v9') ||
                                  document.querySelector('ul.pl_v9');
-                
+
                 if (productList) {
-                    var firstProduct = productList.querySelector('li[data-pr] a[href]');
-                    if (firstProduct) {
-                        var href = firstProduct.getAttribute('href');
-                        if (href && href.match(/,\d+\.html$/)) {
-                            console.log('[Akakce Search] Found product in list: ' + href);
-                            return href.startsWith('/') ? 'https://www.akakce.com' + href : href;
-                        }
+                    var items = productList.querySelectorAll('li[data-pr]');
+                    for (var i = 0; i < items.length && i < 15; i++) {
+                        var link = items[i].querySelector('a[href]');
+                        if (!link) continue;
+                        var href = link.getAttribute('href');
+                        if (!href || !href.match(/,\d+\.html$/)) continue;
+
+                        var titleEl = items[i].querySelector('span.pn_v8, h3, .pn_v9, a span');
+                        var title = titleEl ? titleEl.textContent.trim() : link.textContent.trim();
+
+                        var fullUrl = href.startsWith('/') ? 'https://www.akakce.com' + href : href;
+                        results.push(title + '|||' + fullUrl);
                     }
                 }
-                
-                // Method 2: Look for any product link matching the pattern
-                var allLinks = document.querySelectorAll('a[href*="",""][href$="".html""]');
-                for (var i = 0; i < allLinks.length; i++) {
-                    var href = allLinks[i].getAttribute('href');
-                    if (href && href.match(/,\d+\.html$/)) {
-                        console.log('[Akakce Search] Found product link: ' + href);
-                        return href.startsWith('/') ? 'https://www.akakce.com' + href : href;
-                    }
+
+                if (results.length === 0) {
+                    var noResults = document.querySelector('.no-result') ||
+                                   document.querySelector('[class*=""noResult""]') ||
+                                   document.querySelector('[class*=""empty""]');
+                    if (noResults) return 'NO_RESULTS';
                 }
-                
-                // Method 3: Check if page shows 'no results' message
-                var noResults = document.querySelector('.no-result') || 
-                               document.querySelector('[class*=""noResult""]') ||
-                               document.querySelector('[class*=""empty""]');
-                if (noResults) {
-                    console.log('[Akakce Search] No results found');
-                    return 'NO_RESULTS';
-                }
-                
-                console.log('[Akakce Search] No product links found on page');
-                return null;
+
+                return results.join('###');
             ");
-            
-            if (firstProductUrl == null || string.IsNullOrEmpty(firstProductUrl.ToString()))
+
+            if (searchResultsRaw == null || string.IsNullOrEmpty(searchResultsRaw.ToString()))
             {
                 return null;
             }
-            
-            var productUrl = firstProductUrl.ToString()!;
-            
-            if (productUrl == "NO_RESULTS")
+
+            var rawString = searchResultsRaw.ToString()!;
+
+            if (rawString == "NO_RESULTS")
             {
                 return null;
             }
-            
-            // Validate it's a proper product URL
-            if (!IsProductUrl(productUrl))
+
+            var candidates = rawString
+                .Split("###", StringSplitOptions.RemoveEmptyEntries)
+                .Select(entry =>
+                {
+                    var parts = entry.Split("|||", 2);
+                    return parts.Length == 2 ? (Title: parts[0], Url: parts[1]) : default;
+                })
+                .Where(c => !string.IsNullOrEmpty(c.Url) && IsProductUrl(c.Url))
+                .ToList();
+
+            if (candidates.Count == 0)
             {
                 return null;
             }
-            return productUrl;
+
+            // Pick the first candidate that is not an accessory
+            var bestMatch = PickBestSearchMatch(productName, candidates);
+            Console.WriteLine($"[AkakceSearch] Best match for '{productName}': '{bestMatch.Title}'");
+            return bestMatch.Url;
         }
         catch (Exception ex)
         {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Search for a product by name and return multiple candidate URLs ranked by relevance.
+    /// Non-accessory results come first, followed by accessory results as fallbacks.
+    /// Includes listing price from the search page for fast pre-filtering.
+    /// </summary>
+    public async Task<List<(string Title, string Url, decimal ListingPrice)>> SearchProductCandidatesAsync(string productName, int maxCandidates = 5)
+    {
+        if (string.IsNullOrWhiteSpace(productName))
+            return [];
+
+        return await SearchAndGetRankedCandidates(productName, maxCandidates) ?? [];
+    }
+
+    /// <summary>
+    /// Internal: runs the Akakce search and returns ranked (title, url) pairs.
+    /// Reuses the search navigation from SearchProductAsync.
+    /// </summary>
+    private async Task<List<(string Title, string Url, decimal ListingPrice)>?> SearchAndGetRankedCandidates(string productName, int maxCandidates)
+    {
+        if (string.IsNullOrWhiteSpace(productName))
+            return null;
+
+        try
+        {
+            if (!IsDriverAlive())
+            {
+                lock (_driverLock)
+                {
+                    try { _driver?.Quit(); } catch { }
+                    _driver = null;
+                    _initializationAttempted = false;
+                }
+                if (!await TryConnectToExistingEdgeAsync())
+                    return null;
+            }
+
+            var preSearchDelay = _cloudflareDetected
+                ? _random.Next(MIN_DELAY_CLOUDFLARE, MAX_DELAY_CLOUDFLARE)
+                : _random.Next(MIN_DELAY_SEARCH, MAX_DELAY_SEARCH);
+            await Task.Delay(preSearchDelay * 1000);
+
+            var trimmedName = productName.Trim();
+            var firstSpace = trimmedName.IndexOf(' ');
+            var searchQuery = firstSpace > 0 ? trimmedName[(firstSpace + 1)..] : trimmedName;
+
+            var encodedQuery = System.Net.WebUtility.UrlEncode(searchQuery);
+            var searchUrl = $"https://www.akakce.com/arama/?q={encodedQuery}";
+
+            _driver!.Navigate().GoToUrl(searchUrl);
+            await Task.Delay(2000);
+
+            var title = _driver.Title ?? "";
+            var pageSource = "";
+            try { pageSource = _driver.PageSource ?? ""; } catch { }
+
+            bool isCloudflare =
+                title.Contains("Bir dakika", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("Just a moment", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("Checking your browser", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("Attention Required", StringComparison.OrdinalIgnoreCase) ||
+                pageSource.Contains("cf-browser-verification", StringComparison.OrdinalIgnoreCase) ||
+                pageSource.Contains("challenge-platform", StringComparison.OrdinalIgnoreCase) ||
+                pageSource.Contains("Verify you are human", StringComparison.OrdinalIgnoreCase);
+
+            if (isCloudflare)
+            {
+                _cloudflareDetected = true;
+                await Task.Delay(_random.Next(CLOUDFLARE_COOLDOWN_MIN, CLOUDFLARE_COOLDOWN_MAX) * 1000);
+                return null;
+            }
+
+            var currentUrl = _driver.Url;
+            if (IsProductUrl(currentUrl))
+                return [(productName, currentUrl, 0m)];
+
+            var jsExecutor = (IJavaScriptExecutor)_driver;
+            jsExecutor.ExecuteScript("window.scrollTo(0, 300);");
+            await RandomDelay(500, 1000);
+
+            var searchResultsRaw = jsExecutor.ExecuteScript(@"
+                var results = [];
+                var productList = document.querySelector('ul#CPL') ||
+                                 document.querySelector('ul.pl_v9.qv_v9') ||
+                                 document.querySelector('ul.pl_v9');
+                if (productList) {
+                    var items = productList.querySelectorAll('li[data-pr]');
+                    for (var i = 0; i < items.length && i < 15; i++) {
+                        var link = items[i].querySelector('a[href]');
+                        if (!link) continue;
+                        var href = link.getAttribute('href');
+                        if (!href || !href.match(/,\d+\.html$/)) continue;
+                        var titleEl = items[i].querySelector('span.pn_v8, h3, .pn_v9, a span');
+                        var title = titleEl ? titleEl.textContent.trim() : link.textContent.trim();
+                        var fullUrl = href.startsWith('/') ? 'https://www.akakce.com' + href : href;
+
+                        // Extract listing price from the search result item
+                        var price = 0;
+                        var priceEl = items[i].querySelector('.pt_v8, .pr_v8 .pb_v8, .fiyat, [class*=""price""]');
+                        if (priceEl) {
+                            var priceText = priceEl.textContent.trim();
+                            var m = priceText.match(/([0-9]{1,3}(?:\.[0-9]{3})*),(\d{2})/);
+                            if (m) price = parseFloat(m[1].replace(/\./g, '') + '.' + m[2]);
+                        }
+                        if (price === 0) {
+                            // Fallback: scan all text in the item for a Turkish price pattern
+                            var itemText = items[i].textContent || '';
+                            var m2 = itemText.match(/([0-9]{1,3}(?:\.[0-9]{3})*),(\d{2})\s*TL/);
+                            if (m2) price = parseFloat(m2[1].replace(/\./g, '') + '.' + m2[2]);
+                        }
+
+                        results.push(title + '|||' + fullUrl + '|||' + price);
+                    }
+                }
+                if (results.length === 0) {
+                    var noResults = document.querySelector('.no-result') ||
+                                   document.querySelector('[class*=""noResult""]') ||
+                                   document.querySelector('[class*=""empty""]');
+                    if (noResults) return 'NO_RESULTS';
+                }
+                return results.join('###');
+            ");
+
+            if (searchResultsRaw == null || string.IsNullOrEmpty(searchResultsRaw.ToString()))
+                return null;
+
+            var rawString = searchResultsRaw.ToString()!;
+            if (rawString == "NO_RESULTS")
+                return null;
+
+            var allCandidates = rawString
+                .Split("###", StringSplitOptions.RemoveEmptyEntries)
+                .Select(entry =>
+                {
+                    var parts = entry.Split("|||", 3);
+                    if (parts.Length < 2) return default;
+                    decimal listingPrice = 0;
+                    if (parts.Length >= 3)
+                        decimal.TryParse(parts[2], System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.InvariantCulture, out listingPrice);
+                    return (Title: parts[0], Url: parts[1], ListingPrice: listingPrice);
+                })
+                .Where(c => !string.IsNullOrEmpty(c.Url) && IsProductUrl(c.Url))
+                .ToList();
+
+            if (allCandidates.Count == 0)
+                return null;
+
+            // Rank: non-accessories first, then accessories
+            var queryTokens = Tokenize(productName);
+            var ranked = new List<(string Title, string Url, decimal ListingPrice)>();
+            var accessories = new List<(string Title, string Url, decimal ListingPrice)>();
+
+            foreach (var c in allCandidates)
+            {
+                var titleTokens = Tokenize(c.Title);
+                bool isAccessory = titleTokens.Any(tt => AccessoryIndicators.Contains(tt) && !queryTokens.Contains(tt));
+                if (isAccessory)
+                    accessories.Add(c);
+                else
+                    ranked.Add(c);
+            }
+
+            ranked.AddRange(accessories);
+            return ranked.Take(maxCandidates).ToList();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AkakceSearch] SearchCandidates error for '{productName}': {ex.Message}");
             return null;
         }
     }
@@ -1101,6 +1285,104 @@ public class AkakceScraper : IDisposable
         if (string.IsNullOrEmpty(url)) return false;
         return url.Contains("akakce.com") && 
                System.Text.RegularExpressions.Regex.IsMatch(url, @",\d+\.html$");
+    }
+
+    /// <summary>
+    /// Pick the first search result that is not an accessory/part.
+    /// Trusts Akakce's ranking — the first non-accessory result is usually correct.
+    /// Falls back to the very first result if all candidates contain accessory words.
+    /// </summary>
+    private static (string Title, string Url) PickBestSearchMatch(
+        string query,
+        List<(string Title, string Url)> candidates)
+    {
+        var queryTokens = Tokenize(query);
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            var (title, url) = candidates[i];
+            var titleTokens = Tokenize(title);
+            if (titleTokens.Count == 0) continue;
+
+            bool isAccessory = false;
+            foreach (var tt in titleTokens)
+            {
+                if (AccessoryIndicators.Contains(tt) && !queryTokens.Contains(tt))
+                {
+                    isAccessory = true;
+                    break;
+                }
+            }
+
+            if (!isAccessory)
+            {
+                Console.WriteLine($"[AkakceMatch] Selected #{i + 1}: {Truncate(title, 80)}");
+                return (title, url);
+            }
+
+            Console.WriteLine($"[AkakceMatch] Skip #{i + 1} (accessory): {Truncate(title, 80)}");
+        }
+
+        // All candidates have accessory words — return the first one anyway
+        Console.WriteLine($"[AkakceMatch] All candidates flagged as accessory, using #1");
+        return candidates[0];
+    }
+
+    private static readonly char[] TokenSeparators = [' ', '-', '/', '(', ')', ',', '\t'];
+    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "akýllý", "telefon", "cep", "telefonu", "siyah", "beyaz", "mavi", "kýrmýzý",
+        "yeþil", "gri", "pembe", "mor", "sarý", "turuncu", "altýn", "gümüþ",
+        "black", "white", "blue", "red", "green", "gray", "grey", "gold", "silver", "purple",
+        "ve", "ile", "için", "veya", "bir", "the", "and", "for", "with", "of"
+    };
+
+    /// <summary>
+    /// Words that strongly indicate an accessory, part, or add-on rather than the product itself.
+    /// Only penalized when they appear in the candidate title but NOT in the search query.
+    /// </summary>
+    private static readonly HashSet<string> AccessoryIndicators = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Turkish accessory / part keywords
+        "uyumlu", "kýlýf", "kýlýfý", "koruyucu", "koruma",
+        "kablosu", "kablo", "adaptör", "adaptörü",
+        "þarj", "þarjcý", "þarjcýsý",
+        "kapak", "kapaðý", "aksesuar", "aksesuarý",
+        "yedek", "parça", "parçasý",
+        "kolu", "aparat", "aparatý",
+        "standý", "çanta", "çantasý", "tutucu",
+        "filtre", "filtresi", "batarya", "bataryasý",
+        "folyo", "folyosu",
+        "bant", "bandý", "kayýþ", "kayýþý",
+        "aský", "askýsý", "çerçeve", "çerçevesi",
+        "süngeri", "sünger",
+        "montaj", "baðlantý",
+        "örtü", "örtüsü",
+        "lens", "pil",
+        // English accessory / part keywords
+        "compatible", "case", "cover", "protector",
+        "cable", "charger", "adapter",
+        "holder", "mount", "bracket",
+        "strap", "band", "skin",
+        "replacement", "spare",
+        "accessory", "accessories",
+        "grip", "sleeve", "pouch",
+        "tempered", "film"
+    };
+
+    private static string Truncate(string text, int maxLength) =>
+        string.IsNullOrEmpty(text) || text.Length <= maxLength ? text : text[..maxLength] + "...";
+
+    private static HashSet<string> Tokenize(string text)
+    {
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in text.Split(TokenSeparators, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var token = raw.Trim().ToLowerInvariant();
+            if (token.Length > 0 && !StopWords.Contains(token))
+                tokens.Add(token);
+        }
+        return tokens;
     }
 
     /// <summary>

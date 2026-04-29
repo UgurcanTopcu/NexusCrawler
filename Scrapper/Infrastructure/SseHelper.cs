@@ -23,7 +23,9 @@ public static class SseHelper
                 message,
                 type
             });
-            await writer.WriteLineAsync($"data: {data}\n");
+            // Use WriteAsync with explicit \n\n to guarantee proper SSE event separation
+            // on all platforms (WriteLineAsync adds \r\n on Windows, breaking \n\n splits)
+            await writer.WriteAsync($"data: {data}\n\n");
             await writer.FlushAsync();
         };
     }
@@ -40,7 +42,7 @@ public static class SseHelper
             type = "error",
             complete = true
         });
-        await writer.WriteLineAsync($"data: {errorData}\n");
+        await writer.WriteAsync($"data: {errorData}\n\n");
         await writer.FlushAsync();
     }
 
@@ -56,7 +58,7 @@ public static class SseHelper
             type = "error",
             complete = true
         });
-        await writer.WriteLineAsync($"data: {errorData}\n");
+        await writer.WriteAsync($"data: {errorData}\n\n");
         await writer.FlushAsync();
     }
 

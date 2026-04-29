@@ -231,7 +231,7 @@
             <p>Compare prices and find sellers across Akakce</p>
         </div>
 
-        <div class="nav-grid">
+        <div class="nav-grid" style="grid-template-columns: repeat(5, 1fr);">
             <div class="nav-item" onclick="location.href='/'">
                 <h3>🛒 Category Scraper</h3>
                 <p>Trendyol & Hepsiburada</p>
@@ -248,6 +248,10 @@
                 <h3>🖼️ Image Processing</h3>
                 <p>Bulk Resizing</p>
             </div>
+            <div class="nav-item" onclick="location.href='/price-index'">
+                <h3>📈 Price Index</h3>
+                <p>Daily Price Trends</p>
+            </div>
         </div>
 
         <div class="card">
@@ -256,7 +260,7 @@
             </div>
             <div class="card-body">
                 <div class="mode-toggle">
-                <div class="mode-btn active" id="modeUrl" onclick="setMode('url')">🔗 Category URL</div>
+                    <div class="mode-btn active" id="modeUrl" onclick="setMode('url')">🔗 Category URL</div>
                     <div class="mode-btn" id="modeFile" onclick="setMode('file')">📄 Product URLs (Excel)</div>
                     <div class="mode-btn" id="modeSearch" onclick="setMode('search')">🔍 Search by Name</div>
                     <div class="mode-btn" id="modePriceCompare" onclick="setMode('priceCompare')">💲 Price Compare</div>
@@ -266,10 +270,14 @@
                     
                     <div class="input-section active" id="urlSection">
                         <div class="form-group">
-                            <label>Akakce Category URL</label>
-                            <input type="text" id="categoryUrl" 
-                                placeholder="https://www.akakce.com/laptop-notebook.html"
-                                value="https://www.akakce.com/laptop-notebook.html">
+                            <label>Akakce Category URL(s) <span style="font-size:11px;color:#64748b;">(one per line)</span></label>
+                            <textarea id="categoryUrl" rows="6"
+                                placeholder="https://www.akakce.com/laptop-notebook.html
+https://www.akakce.com/tablet.html
+
+https://www.akakce.com/cep-telefonu.html"
+                                style="width:100%;padding:12px 16px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:10px;color:#e2e8f0;font-size:14px;resize:vertical;font-family:inherit;">https://www.akakce.com/laptop-notebook.html</textarea>
+                            <div class="input-hint">Paste category URLs, one per line. In <b>Grouped</b> mode, separate groups with a blank line.</div>
                         </div>
 
                         <div class="form-group">
@@ -288,11 +296,51 @@
                             <label for="scanVariantsUrl">Scan All Product Variants (Storage, Color, etc.)</label>
                         </div>
 
+                        <div class="form-group">
+                            <label>Max Sellers Per Product</label>
+                            <input type="number" id="maxSellersPerProduct" min="0" value="0">
+                            <div class="input-hint">Use 0 to keep all sellers. Example: 5 = only first 5 sellers.</div>
+                        </div>
+
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="includePreferredMarketplaceMatches">
+                            <label for="includePreferredMarketplaceMatches">Only keep matching marketplaces before applying the seller limit</label>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Preferred Marketplaces</label>
+                            <input type="text" id="preferredMarketplaces" value="Trendyol, Hepsiburada, n11">
+                            <div class="input-hint">Broad match checks marketplace, seller name, and seller link. Example: only keep top Trendyol, Hepsiburada, and n11 sellers.</div>
+                        </div>
+
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="useScrapeDoUrl">
+                            <label for="useScrapeDoUrl">⚡ Use Scrape.do for product pages (faster, no Cloudflare delays — Selenium still used for category listing)</label>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Output Mode <span style="font-size:11px;color:#64748b;">(when using multiple URLs)</span></label>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <label style="flex:1;min-width:140px;display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(236,72,153,0.15);border:1px solid #ec4899;border-radius:8px;cursor:pointer;font-size:13px;color:#f9a8d4;">
+                                    <input type="radio" name="outputMode" value="combined" checked style="accent-color:#ec4899;"> 📦 Combined
+                                </label>
+                                <label style="flex:1;min-width:140px;display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:8px;cursor:pointer;font-size:13px;color:#94a3b8;">
+                                    <input type="radio" name="outputMode" value="grouped" style="accent-color:#ec4899;"> 📑 Grouped
+                                </label>
+                                <label style="flex:1;min-width:140px;display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:8px;cursor:pointer;font-size:13px;color:#94a3b8;">
+                                    <input type="radio" name="outputMode" value="separate" style="accent-color:#ec4899;"> 📄 Separate
+                                </label>
+                            </div>
+                            <div class="input-hint">Combined = one Excel. Grouped = blank lines separate groups, each group → one Excel. Separate = one Excel per URL.</div>
+                        </div>
+
                         <div class="example-box">
-                            <strong>Example Category URLs:</strong><br>
-                            • Laptops: https://www.akakce.com/laptop-notebook.html<br>
-                            • Phones: https://www.akakce.com/cep-telefonu.html<br>
-                            • TVs: https://www.akakce.com/televizyon.html
+                            <strong>Example (Grouped mode — blank line = new file):</strong><br>
+                            https://www.akakce.com/laptop-notebook.html<br>
+                            https://www.akakce.com/tablet.html<br>
+                            <span style="color:#64748b;">&nbsp;&nbsp;↑ combined into Excel #1</span><br><br>
+                            https://www.akakce.com/cep-telefonu.html<br>
+                            <span style="color:#64748b;">&nbsp;&nbsp;↑ standalone Excel #2</span>
                         </div>
                     </div>
 
@@ -374,6 +422,11 @@
                             Best price per marketplace + <strong>Delta %</strong> vs market best price<br>
                             🟢 Green = your price is lower &nbsp;|&nbsp; 🔴 Red = your price is higher
                         </div>
+
+                        <div class="checkbox-item" style="margin-top: 16px;">
+                            <input type="checkbox" id="useScrapeDoCompare">
+                            <label for="useScrapeDoCompare">⚡ Use Scrape.do for seller fetch (faster, no Cloudflare on product pages)</label>
+                        </div>
                     </div>
 
                     <div class="action-buttons">
@@ -422,12 +475,31 @@
     </div>
 
     <script>
+        // Toggle radio button label styling
+        document.querySelectorAll('input[name="outputMode"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                document.querySelectorAll('input[name="outputMode"]').forEach(r => {
+                    const lbl = r.closest('label');
+                    if (r.checked) {
+                        lbl.style.background = 'rgba(236,72,153,0.15)';
+                        lbl.style.borderColor = '#ec4899';
+                        lbl.style.color = '#f9a8d4';
+                    } else {
+                        lbl.style.background = 'rgba(255,255,255,0.05)';
+                        lbl.style.borderColor = 'rgba(255,255,255,0.15)';
+                        lbl.style.color = '#94a3b8';
+                    }
+                });
+            });
+        });
+
         let isRunning = false;
         let sessionId = null;
         let currentMode = 'url';
         let selectedFileUrl = null;
         let selectedFileSearch = null;
         let selectedFilePriceCompare = null;
+        const MAX_LOG_ITEMS = 100;
 
         // File upload setup
         function setupUpload(areaId, inputId, textId, hintId, selectedId, nameId, type) {
@@ -450,19 +522,20 @@
         setupUpload('uploadAreaPriceCompare', 'fileInputPriceCompare', 'uploadTextPriceCompare', 'uploadHintPriceCompare', 'fileSelectedPriceCompare', 'fileNamePriceCompare', 'priceCompare');
 
         function handleFileChange(type) {
-            const input = document.getElementById(type === 'file' ? 'fileInputFile' : type === 'search' ? 'fileInputSearch' : 'fileInputPriceCompare');
+            const inputId = type === 'file' ? 'fileInputFile' : type === 'search' ? 'fileInputSearch' : 'fileInputPriceCompare';
+            const input = document.getElementById(inputId);
             const file = input.files[0];
             if (file) {
                 if (type === 'file') selectedFileUrl = file;
                 else if (type === 'search') selectedFileSearch = file;
                 else selectedFilePriceCompare = file;
-                
-                const nameEl = document.getElementById(type === 'file' ? 'fileNameFile' : type === 'search' ? 'fileNameSearch' : 'fileNamePriceCompare');
+
+                const nameEl     = document.getElementById(type === 'file' ? 'fileNameFile' : type === 'search' ? 'fileNameSearch' : 'fileNamePriceCompare');
                 const selectedEl = document.getElementById(type === 'file' ? 'fileSelectedFile' : type === 'search' ? 'fileSelectedSearch' : 'fileSelectedPriceCompare');
-                const textEl = document.getElementById(type === 'file' ? 'uploadTextFile' : type === 'search' ? 'uploadTextSearch' : 'uploadTextPriceCompare');
-                const hintEl = document.getElementById(type === 'file' ? 'uploadHintFile' : type === 'search' ? 'uploadHintSearch' : 'uploadHintPriceCompare');
-                const areaEl = document.getElementById(type === 'file' ? 'uploadAreaFile' : type === 'search' ? 'uploadAreaSearch' : 'uploadAreaPriceCompare');
-                
+                const textEl     = document.getElementById(type === 'file' ? 'uploadTextFile' : type === 'search' ? 'uploadTextSearch' : 'uploadTextPriceCompare');
+                const hintEl     = document.getElementById(type === 'file' ? 'uploadHintFile' : type === 'search' ? 'uploadHintSearch' : 'uploadHintPriceCompare');
+                const areaEl     = document.getElementById(type === 'file' ? 'uploadAreaFile' : type === 'search' ? 'uploadAreaSearch' : 'uploadAreaPriceCompare');
+
                 nameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
                 selectedEl.classList.add('show');
                 textEl.style.display = 'none';
@@ -474,21 +547,21 @@
 
         function removeFile(type, e) {
             if (e) e.stopPropagation();
-            const input = document.getElementById(type === 'file' ? 'fileInputFile' : type === 'search' ? 'fileInputSearch' : 'fileInputPriceCompare');
-            const selectedEl = document.getElementById(type === 'file' ? 'fileSelectedFile' : type === 'search' ? 'fileSelectedSearch' : 'fileSelectedPriceCompare');
-            const textEl = document.getElementById(type === 'file' ? 'uploadTextFile' : type === 'search' ? 'uploadTextSearch' : 'uploadTextPriceCompare');
-            const hintEl = document.getElementById(type === 'file' ? 'uploadHintFile' : type === 'search' ? 'uploadHintSearch' : 'uploadHintPriceCompare');
-            const areaEl = document.getElementById(type === 'file' ? 'uploadAreaFile' : type === 'search' ? 'uploadAreaSearch' : 'uploadAreaPriceCompare');
-            
-            input.value = '';
+            const inputId    = type === 'file' ? 'fileInputFile' : type === 'search' ? 'fileInputSearch' : 'fileInputPriceCompare';
+            const selectedId = type === 'file' ? 'fileSelectedFile' : type === 'search' ? 'fileSelectedSearch' : 'fileSelectedPriceCompare';
+            const textId     = type === 'file' ? 'uploadTextFile' : type === 'search' ? 'uploadTextSearch' : 'uploadTextPriceCompare';
+            const hintId     = type === 'file' ? 'uploadHintFile' : type === 'search' ? 'uploadHintSearch' : 'uploadHintPriceCompare';
+            const areaId     = type === 'file' ? 'uploadAreaFile' : type === 'search' ? 'uploadAreaSearch' : 'uploadAreaPriceCompare';
+
+            document.getElementById(inputId).value = '';
             if (type === 'file') selectedFileUrl = null;
             else if (type === 'search') selectedFileSearch = null;
             else selectedFilePriceCompare = null;
-            
-            selectedEl.classList.remove('show');
-            textEl.style.display = 'block';
-            hintEl.style.display = 'block';
-            areaEl.classList.remove('has-file');
+
+            document.getElementById(selectedId).classList.remove('show');
+            document.getElementById(textId).style.display = 'block';
+            document.getElementById(hintId).style.display = 'block';
+            document.getElementById(areaId).classList.remove('has-file');
             updateStartBtn();
         }
 
@@ -513,6 +586,20 @@
             else btn.disabled = !selectedFilePriceCompare;
         }
 
+        function trimLogItems() {
+            const logBody = document.getElementById('logBody');
+            const logItems = logBody.querySelectorAll('.log-item');
+
+            if (logItems.length <= MAX_LOG_ITEMS) {
+                return;
+            }
+
+            const itemsToRemove = logItems.length - MAX_LOG_ITEMS;
+            for (let index = 0; index < itemsToRemove; index++) {
+                logItems[index].remove();
+            }
+        }
+
         function addLog(message, type = 'info') {
             const logBody = document.getElementById('logBody');
             const logEmpty = document.getElementById('logEmpty');
@@ -520,9 +607,53 @@
             const iconMap = { success: '?', error: '?', warning: '!', info: '?' };
             const item = document.createElement('div');
             item.className = `log-item ${type}`;
-            item.innerHTML = `<div class="log-icon">${iconMap[type] || '?'}</div><div class="log-content"><div class="log-message">${message}</div></div><div class="log-time">${new Date().toLocaleTimeString()}</div>`;
+
+            const icon = document.createElement('div');
+            icon.className = 'log-icon';
+            icon.textContent = iconMap[type] || '?';
+
+            const content = document.createElement('div');
+            content.className = 'log-content';
+
+            const messageElement = document.createElement('div');
+            messageElement.className = 'log-message';
+            messageElement.textContent = message;
+            content.appendChild(messageElement);
+
+            const time = document.createElement('div');
+            time.className = 'log-time';
+            time.textContent = new Date().toLocaleTimeString();
+
+            item.append(icon, content, time);
             logBody.appendChild(item);
+            trimLogItems();
             logBody.scrollTop = logBody.scrollHeight;
+        }
+
+        function processProgressEvent(eventText) {
+            const dataLines = eventText
+                .split('\n')
+                .filter(line => line.startsWith('data: '))
+                .map(line => line.slice(6));
+
+            if (dataLines.length === 0) {
+                return;
+            }
+
+            try {
+                const data = JSON.parse(dataLines.join('\n'));
+                if (data.progress !== undefined) updateProgress(data.progress);
+                if (data.message) addLog(data.message, data.type || 'info');
+                if (data.downloadUrl) {
+                    const link = document.createElement('a');
+                    link.href = data.downloadUrl;
+                    link.className = 'download-link';
+                    link.innerHTML = '<span>⬇️</span> Download Excel';
+                    document.getElementById('logBody').appendChild(link);
+                }
+            } catch (error) {
+                console.error('Failed to parse progress event', error, eventText);
+            }
         }
 
         function clearLog() {
@@ -549,12 +680,42 @@
         }
 
         async function handleStop() {
-            if (sessionId) await fetch('/api/akakce/stop/' + sessionId, { method: 'POST' });
+            // Stop all possible sub-sessions (for grouped/separate files mode)
+            if (sessionId) {
+                await fetch('/api/akakce/stop/' + sessionId, { method: 'POST' });
+                for (let i = 0; i < 20; i++) {
+                    fetch('/api/akakce/stop/' + sessionId + '_g' + i, { method: 'POST' }).catch(() => {});
+                }
+            }
             isRunning = false;
             document.getElementById('startBtn').disabled = false;
             document.getElementById('startBtn').innerHTML = '<span>🚀</span> Start Scraping';
             document.getElementById('stopBtn').classList.remove('show');
             addLog('Scraping stopped by user', 'warning');
+        }
+
+        async function consumeProgressResponse(response) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const events = buffer.split('\n\n');
+                buffer = events.pop() || '';
+
+                for (const eventText of events) {
+                    processProgressEvent(eventText.trim());
+                }
+            }
+
+            buffer += decoder.decode();
+            if (buffer.trim().length > 0) {
+                processProgressEvent(buffer.trim());
+            }
         }
 
         document.getElementById('akakceForm').addEventListener('submit', async (e) => {
@@ -571,65 +732,102 @@
             addLog('Starting Akakce scraper...', 'info');
 
             try {
-                let response;
-                
                 if (currentMode === 'url') {
-                    const body = {
-                        categoryUrl: document.getElementById('categoryUrl').value,
+                    // Parse textarea into groups separated by blank lines
+                    const textValue = document.getElementById('categoryUrl').value;
+                    const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'combined';
+
+                    // Build URL groups based on output mode
+                    let urlGroups; // array of arrays
+                    if (outputMode === 'grouped') {
+                        // Split on blank lines to form groups
+                        urlGroups = textValue.split(/\n\s*\n/)
+                            .map(block => block.split('\n').map(u => u.trim()).filter(u => u.startsWith('http://') || u.startsWith('https://')))
+                            .filter(group => group.length > 0);
+                    } else {
+                        // Flat list of all URLs
+                        const allUrls = textValue.split('\n').map(u => u.trim()).filter(u => u.startsWith('http://') || u.startsWith('https://'));
+                        if (outputMode === 'separate') {
+                            urlGroups = allUrls.map(u => [u]); // each URL is its own group
+                        } else {
+                            urlGroups = allUrls.length > 0 ? [allUrls] : []; // all in one group
+                        }
+                    }
+
+                    const totalUrls = urlGroups.reduce((sum, g) => sum + g.length, 0);
+                    if (totalUrls === 0) {
+                        throw new Error('No valid category URLs found. Each URL must start with http:// or https://');
+                    }
+
+                    addLog(`Starting Akakce category scraper: ${totalUrls} URL(s) in ${urlGroups.length} group(s) (${outputMode})...`, 'info');
+
+                    const sharedParams = {
                         maxProducts: parseInt(document.getElementById('maxProducts').value),
                         startFrom: parseInt(document.getElementById('startFrom').value),
                         scanVariants: document.getElementById('scanVariantsUrl').checked,
-                        sessionId: sessionId
+                        maxSellersPerProduct: parseInt(document.getElementById('maxSellersPerProduct').value) || 0,
+                        includePreferredMarketplaceMatches: document.getElementById('includePreferredMarketplaceMatches').checked,
+                        preferredMarketplaces: document.getElementById('preferredMarketplaces').value,
+                        useScrapeDo: document.getElementById('useScrapeDoUrl').checked,
                     };
-                    response = await fetch('/api/akakce/scrape-category', { 
-                        method: 'POST', 
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body)
-                    });
+
+                    if (urlGroups.length === 1 && urlGroups[0].length === 1) {
+                        // Single URL — use the single-category endpoint (unchanged)
+                        const body = { ...sharedParams, categoryUrl: urlGroups[0][0], sessionId };
+                        const response = await fetch('/api/akakce/scrape-category', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        });
+                        await consumeProgressResponse(response);
+                    } else if (outputMode === 'combined') {
+                        // All URLs combined into one Excel — use the batch endpoint
+                        const allUrls = urlGroups.flat();
+                        addLog(`Combining ${allUrls.length} URLs into one Excel...`, 'info');
+                        const body = { ...sharedParams, categoryUrls: allUrls, sessionId };
+                        const response = await fetch('/api/akakce/scrape-categories', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        });
+                        await consumeProgressResponse(response);
+                    } else {
+                        // Multiple groups / separate Excels — send ALL groups in ONE request.
+                        // The server loops over them so Windows lock-screen can't interrupt.
+                        addLog(`🔒 Sending all ${urlGroups.length} groups to server (lock-screen safe)...`, 'info');
+                        const body = { ...sharedParams, urlGroups: urlGroups, sessionId };
+                        const response = await fetch('/api/akakce/scrape-groups', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        });
+                        await consumeProgressResponse(response);
+                    }
+                    if (urlGroups.length > 1) {
+                        addLog(`🏁 All ${urlGroups.length} groups processed (${totalUrls} URLs)`, 'success');
+                    }
                 } else if (currentMode === 'file') {
                     const formData = new FormData();
                     formData.append('file', selectedFileUrl);
                     formData.append('sessionId', sessionId);
                     formData.append('scanVariants', document.getElementById('scanVariantsFile').checked);
-                    response = await fetch('/api/akakce/scrape', { method: 'POST', body: formData });
+                    const response = await fetch('/api/akakce/scrape', { method: 'POST', body: formData });
+                    await consumeProgressResponse(response);
                 } else if (currentMode === 'search') {
                     const formData = new FormData();
                     formData.append('file', selectedFileSearch);
                     formData.append('sessionId', sessionId);
                     formData.append('scanVariants', document.getElementById('scanVariantsSearch').checked);
-                    response = await fetch('/api/akakce/search', { method: 'POST', body: formData });
-                } else {
-                    // priceCompare mode
+                    const response = await fetch('/api/akakce/search', { method: 'POST', body: formData });
+                    await consumeProgressResponse(response);
+                } else if (currentMode === 'priceCompare') {
                     const formData = new FormData();
                     formData.append('file', selectedFilePriceCompare);
                     formData.append('sessionId', sessionId);
-                    response = await fetch('/api/akakce/price-compare', { method: 'POST', body: formData });
-                }
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    const lines = decoder.decode(value).split('\n');
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-                                if (data.progress !== undefined) updateProgress(data.progress);
-                                if (data.message) addLog(data.message, data.type || 'info');
-                                if (data.downloadUrl) {
-                                    const link = document.createElement('a');
-                                    link.href = data.downloadUrl;
-                                    link.className = 'download-link';
-                                    link.innerHTML = '<span>⬇️</span> Download Excel';
-                                    document.getElementById('logBody').appendChild(link);
-                                }
-                            } catch (err) {}
-                        }
-                    }
+                    const useScrapeDo = document.getElementById('useScrapeDoCompare')?.checked;
+                    const endpoint = useScrapeDo ? '/api/akakce/price-compare-v2' : '/api/akakce/price-compare';
+                    const response = await fetch(endpoint, { method: 'POST', body: formData });
+                    await consumeProgressResponse(response);
                 }
             } catch (err) {
                 addLog('Error: ' + err.message, 'error');

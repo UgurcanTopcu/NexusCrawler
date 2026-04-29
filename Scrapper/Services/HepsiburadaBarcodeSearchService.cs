@@ -11,8 +11,11 @@ public class HepsiburadaBarcodeSearchService
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _sessions = new();
     private readonly HttpClient _httpClient;
     private readonly ScrapeDoConfig _config;
-    private const int MaxParallelRequests = 5;
-    private const int DelayBetweenRequestsMs = 1000;
+    private const int MaxRetries = 3;
+    private const int BaseRetryDelayMs = 5000;
+    private const int BarcodeParallelism = 10;
+    private const int DelayBetweenRequestsMs = 500;
+    private static readonly Random _random = new();
 
     static HepsiburadaBarcodeSearchService()
     {
@@ -56,35 +59,29 @@ public class HepsiburadaBarcodeSearchService
                 return;
             }
 
-            await onProgress(5, $"✅ Found {barcodes.Count} barcodes to search (processing {MaxParallelRequests} at a time)", "success");
+            await onProgress(5, $"✅ Found {barcodes.Count:N0} barcodes — searching with {BarcodeParallelism} parallel requests", "success");
 
-            var progressPerBarcode = 85.0 / barcodes.Count;
             var completedCount = 0;
-            var progressLock = new object();
 
-            using var semaphore = new SemaphoreSlim(MaxParallelRequests);
-            // Per-request throttle so concurrent requests don't block each other
-            using var throttle = new SemaphoreSlim(1, 1);
+            using var progressLock = new SemaphoreSlim(1, 1);
 
-            var tasks = barcodes.Select(async (barcode, index) =>
-            {
-                await semaphore.WaitAsync(cts.Token);
-                try
+            await Parallel.ForEachAsync(
+                barcodes,
+                new ParallelOptions
                 {
-                    if (cts.Token.IsCancellationRequested)
-                        return;
-
-                    // Throttle: stagger requests so they don't all hit the API at once
-                    await throttle.WaitAsync(cts.Token);
-                    try { await Task.Delay(DelayBetweenRequestsMs, cts.Token); }
-                    finally { throttle.Release(); }
+                    MaxDegreeOfParallelism = BarcodeParallelism,
+                    CancellationToken = cts.Token
+                },
+                async (barcode, ct) =>
+                {
+                    await Task.Delay(_random.Next(DelayBetweenRequestsMs, DelayBetweenRequestsMs * 2), ct);
 
                     BarcodeSearchResult result;
                     try
                     {
-                        result = await SearchBarcodeAsync(barcode, cts.Token);
+                        result = await SearchBarcodeWithRetryAsync(barcode, ct);
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
                         result = new BarcodeSearchResult
                         {
@@ -96,47 +93,32 @@ public class HepsiburadaBarcodeSearchService
 
                     results.Add(result);
 
-                    int currentCompleted;
-                    lock (progressLock)
-                    {
-                        completedCount++;
-                        currentCompleted = completedCount;
-                    }
+                    var current = Interlocked.Increment(ref completedCount);
+                    var progress = (int)(10.0 + current * 85.0 / barcodes.Count);
+                    bool isError = result.Status?.StartsWith("Error", StringComparison.OrdinalIgnoreCase) == true;
+                    string msg = isError
+                        ? $"⚠️ [{current:N0}/{barcodes.Count:N0}] {barcode}: {result.Status}"
+                        : result.ProductExists
+                            ? $"✅ [{current:N0}/{barcodes.Count:N0}] {barcode}: Found — {TruncateUrl(result.ProductUrl ?? string.Empty, 50)}"
+                            : $"❌ [{current:N0}/{barcodes.Count:N0}] {barcode}: Not Found";
 
-                    var currentProgress = 10.0 + (currentCompleted * progressPerBarcode);
+                    string msgType = isError ? "error" : result.ProductExists ? "success" : "warning";
 
-                    if (result.Status.StartsWith("Error"))
+                    await progressLock.WaitAsync(CancellationToken.None);
+                    try
                     {
-                        await onProgress((int)currentProgress, $"⚠️ [{currentCompleted}/{barcodes.Count}] {barcode}: {result.Status}", "error");
+                        await onProgress(progress, msg, msgType);
                     }
-                    else if (result.ProductExists)
+                    finally
                     {
-                        await onProgress((int)currentProgress, $"✅ [{currentCompleted}/{barcodes.Count}] {barcode}: Found - {TruncateUrl(result.ProductUrl!, 50)}", "success");
+                        progressLock.Release();
                     }
-                    else
-                    {
-                        await onProgress((int)currentProgress, $"❌ [{currentCompleted}/{barcodes.Count}] {barcode}: Not Found", "warning");
-                    }
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            }).ToList();
-
-            try
-            {
-                await Task.WhenAll(tasks);
-            }
-            catch (OperationCanceledException)
-            {
-                await onProgress(50, "⛔ Search stopped by user", "warning");
-            }
+                });
 
             var resultsList = results.ToList();
             if (resultsList.Count > 0)
             {
-                await onProgress(95, "📊 Creating Excel report...", "info");
+                await onProgress(95, $"📊 Creating Excel report for {resultsList.Count:N0} results...", "info");
 
                 string fileName;
                 if (!string.IsNullOrEmpty(originalFileName))
@@ -153,16 +135,38 @@ public class HepsiburadaBarcodeSearchService
 
                 ExportResultsToExcel(resultsList, filePath);
 
-                var foundCount = resultsList.Count(r => r.ProductExists);
+                var totalFound = resultsList.Count(r => r.ProductExists);
                 var totalCount = resultsList.Count;
-                var summary = $"✅ Done! {foundCount}/{totalCount} products found";
+                var summary = $"✅ Done! {totalFound:N0}/{totalCount:N0} products found";
 
                 await onProgress(100, summary, "success");
-                await SendComplete(onProgress, fileName, foundCount, totalCount);
+                await SendComplete(onProgress, fileName, totalFound, totalCount);
             }
             else
             {
                 await onProgress(100, "No results", "warning");
+                await SendComplete(onProgress, null, 0, 0);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            await onProgress(90, "⛔ Search stopped by user", "warning");
+
+            // Export whatever was collected before the stop
+            var partial = results.ToList();
+            if (partial.Count > 0)
+            {
+                await onProgress(92, $"📊 Exporting {partial.Count:N0} partial results...", "info");
+                var ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var partialFileName = string.IsNullOrEmpty(originalFileName)
+                    ? $"HepsiburadaBarcode_Partial_{ts}.xlsx"
+                    : $"{Path.GetFileNameWithoutExtension(originalFileName)}_Partial_{ts}.xlsx";
+                var partialPath = Path.Combine(Directory.GetCurrentDirectory(), partialFileName);
+                ExportResultsToExcel(partial, partialPath);
+                await SendComplete(onProgress, partialFileName, partial.Count(r => r.ProductExists), partial.Count);
+            }
+            else
+            {
                 await SendComplete(onProgress, null, 0, 0);
             }
         }
@@ -388,6 +392,53 @@ public class HepsiburadaBarcodeSearchService
         }
     }
 
+    private async Task<BarcodeSearchResult> SearchBarcodeWithRetryAsync(string barcode, CancellationToken cancellationToken)
+    {
+        for (int attempt = 0; attempt <= MaxRetries; attempt++)
+        {
+            try
+            {
+                return await SearchBarcodeAsync(barcode, cancellationToken);
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                if (attempt == MaxRetries)
+                {
+                    return new BarcodeSearchResult
+                    {
+                        Barcode = barcode,
+                        ProductExists = false,
+                        Status = "Error: Rate limited after retries"
+                    };
+                }
+
+                var delayMs = BaseRetryDelayMs * (attempt + 1) + _random.Next(1000, 3000);
+                await Task.Delay(delayMs, cancellationToken);
+            }
+            catch (HttpRequestException) when (attempt < MaxRetries)
+            {
+                // Transient network error (connection drop, DNS failure, Scrape.do 5xx, etc.) — retry
+                var delayMs = BaseRetryDelayMs * (attempt + 1) + _random.Next(1000, 2000);
+                await Task.Delay(delayMs, cancellationToken);
+            }
+            catch (TaskCanceledException ex)
+                when (!cancellationToken.IsCancellationRequested && attempt < MaxRetries)
+            {
+                // HttpClient request timeout (not user-requested cancellation) — retry
+                _ = ex;
+                var delayMs = BaseRetryDelayMs * (attempt + 1) + _random.Next(1000, 2000);
+                await Task.Delay(delayMs, cancellationToken);
+            }
+        }
+
+        return new BarcodeSearchResult
+        {
+            Barcode = barcode,
+            ProductExists = false,
+            Status = "Error: Max retries exceeded"
+        };
+    }
+
     private async Task<string> GetPageHtmlAsync(string url, CancellationToken cancellationToken = default)
     {
         var encodedUrl = System.Net.WebUtility.UrlEncode(url);
@@ -474,8 +525,11 @@ public class HepsiburadaBarcodeSearchService
             row++;
         }
 
-        worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns();
-        worksheet.Column(5).Width = 80;
+        worksheet.Column(1).Width = 22;  // Barcode
+        worksheet.Column(2).Width = 30;  // Status
+        worksheet.Column(3).Width = 55;  // Product Name
+        worksheet.Column(4).Width = 32;  // Product Category
+        worksheet.Column(5).Width = 80;  // Product URL
         package.SaveAs(new FileInfo(filePath));
     }
 

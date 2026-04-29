@@ -31,6 +31,11 @@ public class AkakceProductInfo
     public string Category { get; set; } = string.Empty;
     
     /// <summary>
+    /// Category name derived from the category URL slug (e.g., "hali yikama makinesi")
+    /// </summary>
+    public string CategoryName { get; set; } = string.Empty;
+    
+    /// <summary>
     /// Main product image URL
     /// </summary>
     public string ImageUrl { get; set; } = string.Empty;
