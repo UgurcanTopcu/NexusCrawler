@@ -253,6 +253,7 @@ public class AkakceScraperService
                 if (product != null)
                 {
                     product.CategoryName = GetCategoryFileLabel(categoryUrl);
+                    product.SourceCategoryUrl = categoryUrl;
                     SetBrandFromName(product);
                     products.Add(product);
                 }
@@ -968,6 +969,7 @@ public class AkakceScraperService
                     if (product != null)
                     {
                         product.CategoryName = categoryName;
+                        product.SourceCategoryUrl = categoryUrl;
                         SetBrandFromName(product);
                         allProducts.Add(product);
                     }

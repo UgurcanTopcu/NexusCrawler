@@ -317,6 +317,14 @@ public class BulkImageProcessingService
             // Clean the URL (remove any existing query parameters that might interfere)
             var cleanUrl = originalUrl.Split('?')[0];
             
+            // wsrv.nl requires domain-based URLs without the protocol when they are url-encoded
+            if (cleanUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                cleanUrl = cleanUrl.Substring(8);
+            else if (cleanUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                cleanUrl = cleanUrl.Substring(7);
+            else if (cleanUrl.StartsWith("//"))
+                cleanUrl = cleanUrl.Substring(2);
+
             // Encode the URL for use as a query parameter
             var encodedUrl = HttpUtility.UrlEncode(cleanUrl);
             

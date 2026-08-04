@@ -349,7 +349,7 @@ public class AkakceExcelExporter
             // Headers
             var headers = new[]
             {
-                "Category Name", "Product ID", "Product Name", "Brand", "Category",
+                "Category Name", "Source Category URL", "Product ID", "Product Name", "Brand", "Category",
                 "Lowest Price", "Highest Price", "Seller Count",
                 "Image URL", "Product URL", "Scraped At", "Status"
             };
@@ -376,26 +376,27 @@ public class AkakceExcelExporter
                 int row = i + 2;
 
                 ws.Cells[row, 1].Value = p.CategoryName;
-                ws.Cells[row, 2].Value = p.ProductId;
-                ws.Cells[row, 3].Value = p.Name;
-                ws.Cells[row, 4].Value = p.Brand;
-                ws.Cells[row, 5].Value = p.Category;
-                ws.Cells[row, 6].Value = p.LowestPrice;
-                ws.Cells[row, 7].Value = p.HighestPrice;
-                ws.Cells[row, 8].Value = p.SellerCount;
-                ws.Cells[row, 9].Value = p.ImageUrl;
-                ws.Cells[row, 10].Value = p.ProductUrl;
-                ws.Cells[row, 11].Value = p.ScrapedAt.ToString("yyyy-MM-dd HH:mm");
-                ws.Cells[row, 12].Value = p.IsSuccess ? "Success" : $"Error: {p.ErrorMessage}";
+                ws.Cells[row, 2].Value = p.SourceCategoryUrl;
+                ws.Cells[row, 3].Value = p.ProductId;
+                ws.Cells[row, 4].Value = p.Name;
+                ws.Cells[row, 5].Value = p.Brand;
+                ws.Cells[row, 6].Value = p.Category;
+                ws.Cells[row, 7].Value = p.LowestPrice;
+                ws.Cells[row, 8].Value = p.HighestPrice;
+                ws.Cells[row, 9].Value = p.SellerCount;
+                ws.Cells[row, 10].Value = p.ImageUrl;
+                ws.Cells[row, 11].Value = p.ProductUrl;
+                ws.Cells[row, 12].Value = p.ScrapedAt.ToString("yyyy-MM-dd HH:mm");
+                ws.Cells[row, 13].Value = p.IsSuccess ? "Success" : $"Error: {p.ErrorMessage}";
 
                 // Color code status
                 if (!p.IsSuccess)
                 {
-                    ws.Cells[row, 12].Style.Font.Color.SetColor(Color.Red);
+                    ws.Cells[row, 13].Style.Font.Color.SetColor(Color.Red);
                 }
                 else
                 {
-                    ws.Cells[row, 12].Style.Font.Color.SetColor(Color.Green);
+                    ws.Cells[row, 13].Style.Font.Color.SetColor(Color.Green);
                 }
             }
 
@@ -1119,7 +1120,7 @@ public class AkakceExcelExporter
             // Headers - comprehensive view with Marketplace
             var headers = new[]
             {
-                "Category Name", "Product ID", "Product Name", "Brand", "Category",
+                "Category Name", "Source Category URL", "Product ID", "Product Name", "Brand", "Category",
                 "Seller Rank", "Marketplace", "Seller Name", "Price", "Price (TL)",
                 "Shipping", "Free Shipping", "In Stock",
                 "Seller Rating", "Product Link",
@@ -1151,18 +1152,19 @@ public class AkakceExcelExporter
                 {
                     // Product with no sellers - still show one row
                     ws.Cells[row, 1].Value = product.CategoryName;
-                    ws.Cells[row, 2].Value = product.ProductId;
-                    ws.Cells[row, 3].Value = product.Name;
-                    ws.Cells[row, 4].Value = product.Brand;
-                    ws.Cells[row, 5].Value = product.Category;
-                    ws.Cells[row, 6].Value = "-";
+                    ws.Cells[row, 2].Value = product.SourceCategoryUrl;
+                    ws.Cells[row, 3].Value = product.ProductId;
+                    ws.Cells[row, 4].Value = product.Name;
+                    ws.Cells[row, 5].Value = product.Brand;
+                    ws.Cells[row, 6].Value = product.Category;
                     ws.Cells[row, 7].Value = "-";
-                    ws.Cells[row, 8].Value = product.IsSuccess ? "No sellers found" : product.ErrorMessage;
-                    ws.Cells[row, 16].Value = product.LowestPrice;
-                    ws.Cells[row, 17].Value = product.HighestPrice;
-                    ws.Cells[row, 18].Value = 0;
-                    ws.Cells[row, 19].Value = product.ImageUrl;
-                    ws.Cells[row, 20].Value = product.ProductUrl;
+                    ws.Cells[row, 8].Value = "-";
+                    ws.Cells[row, 9].Value = product.IsSuccess ? "No sellers found" : product.ErrorMessage;
+                    ws.Cells[row, 17].Value = product.LowestPrice;
+                    ws.Cells[row, 18].Value = product.HighestPrice;
+                    ws.Cells[row, 19].Value = 0;
+                    ws.Cells[row, 20].Value = product.ImageUrl;
+                    ws.Cells[row, 21].Value = product.ProductUrl;
                     row++;
                     detailCount++;
                 }
@@ -1171,33 +1173,34 @@ public class AkakceExcelExporter
                     foreach (var seller in product.Sellers)
                     {
                         ws.Cells[row, 1].Value = product.CategoryName;
-                        ws.Cells[row, 2].Value = product.ProductId;
-                        ws.Cells[row, 3].Value = product.Name;
-                        ws.Cells[row, 4].Value = product.Brand;
-                        ws.Cells[row, 5].Value = product.Category;
-                        ws.Cells[row, 6].Value = seller.Rank;
-                        ws.Cells[row, 7].Value = seller.Marketplace;
-                        ws.Cells[row, 8].Value = seller.SellerName;
-                        ws.Cells[row, 9].Value = seller.PriceFormatted;
-                        ws.Cells[row, 10].Value = seller.Price;
-                        ws.Cells[row, 11].Value = seller.ShippingCost;
-                        ws.Cells[row, 12].Value = seller.FreeShipping ? "Yes" : "No";
-                        ws.Cells[row, 13].Value = seller.InStock ? "Yes" : "No";
-                        ws.Cells[row, 14].Value = seller.SellerRating;
-                        ws.Cells[row, 15].Value = seller.ProductLink;
-                        ws.Cells[row, 16].Value = product.LowestPrice;
-                        ws.Cells[row, 17].Value = product.HighestPrice;
-                        ws.Cells[row, 18].Value = product.SellerCount;
-                        ws.Cells[row, 19].Value = product.ImageUrl;
-                        ws.Cells[row, 20].Value = product.ProductUrl;
+                        ws.Cells[row, 2].Value = product.SourceCategoryUrl;
+                        ws.Cells[row, 3].Value = product.ProductId;
+                        ws.Cells[row, 4].Value = product.Name;
+                        ws.Cells[row, 5].Value = product.Brand;
+                        ws.Cells[row, 6].Value = product.Category;
+                        ws.Cells[row, 7].Value = seller.Rank;
+                        ws.Cells[row, 8].Value = seller.Marketplace;
+                        ws.Cells[row, 9].Value = seller.SellerName;
+                        ws.Cells[row, 10].Value = seller.PriceFormatted;
+                        ws.Cells[row, 11].Value = seller.Price;
+                        ws.Cells[row, 12].Value = seller.ShippingCost;
+                        ws.Cells[row, 13].Value = seller.FreeShipping ? "Yes" : "No";
+                        ws.Cells[row, 14].Value = seller.InStock ? "Yes" : "No";
+                        ws.Cells[row, 15].Value = seller.SellerRating;
+                        ws.Cells[row, 16].Value = seller.ProductLink;
+                        ws.Cells[row, 17].Value = product.LowestPrice;
+                        ws.Cells[row, 18].Value = product.HighestPrice;
+                        ws.Cells[row, 19].Value = product.SellerCount;
+                        ws.Cells[row, 20].Value = product.ImageUrl;
+                        ws.Cells[row, 21].Value = product.ProductUrl;
 
                         // Bold rank 1
                         if (seller.Rank == 1)
                         {
-                            ws.Cells[row, 6].Style.Font.Bold = true;
                             ws.Cells[row, 7].Style.Font.Bold = true;
                             ws.Cells[row, 8].Style.Font.Bold = true;
                             ws.Cells[row, 9].Style.Font.Bold = true;
+                            ws.Cells[row, 10].Style.Font.Bold = true;
                         }
 
                         row++;
