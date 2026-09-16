@@ -16,7 +16,9 @@ builder.Services.AddSingleton<HepsiburadaScraperService>();
 builder.Services.AddSingleton<AkakceScraperService>();
 builder.Services.AddSingleton<AkakceSearchService>();
 builder.Services.AddSingleton<AkakcePriceComparisonService>();
+builder.Services.AddSingleton<ScrapeDoFetcher>();
 builder.Services.AddSingleton<AkakceScrapeDoService>();
+builder.Services.AddSingleton<AkakceHttpSearchService>();
 builder.Services.AddSingleton<AkakcePriceComparisonV2Service>();
 builder.Services.AddSingleton<PriceIndexService>();
 builder.Services.AddSingleton<HepsiburadaBarcodeSearchService>();
@@ -544,7 +546,82 @@ app.MapPost("/api/akakce/price-compare", async (HttpRequest request, AkakcePrice
     }, "text/event-stream");
 });
 
-// Akakce price comparison V2 - Selenium search + Scrape.do fetch (faster, no Cloudflare on product pages)
+// MediaMarkt Retail (1P) vs Marketplace (3P) comparison.
+// Accepts .csv or .xlsx; with no file it falls back to the Offer KPI export in wwwroot.
+app.MapPost("/api/akakce/retail-vs-marketplace", async (
+    HttpRequest request,
+    AkakcePriceComparisonV2Service v2Service,
+    IWebHostEnvironment env) =>
+{
+    return Results.Stream(async (stream) =>
+    {
+        var writer = new StreamWriter(stream);
+
+        try
+        {
+            var form = await request.ReadFormAsync();
+            var file = form.Files.GetFile("file");
+            var sessionId = form["sessionId"].ToString();
+
+            var options = new PriceComparisonOptions { RetailReport = true };
+
+            if (int.TryParse(form["maxProducts"], out var maxProducts) && maxProducts > 0)
+                options.MaxProducts = maxProducts;
+
+            if (int.TryParse(form["parallelism"], out var parallelism) && parallelism > 0)
+                options.DegreeOfParallelism = Math.Min(parallelism, 20);
+
+            var categories = form["categories"].ToString();
+            if (!string.IsNullOrWhiteSpace(categories))
+            {
+                options.FocusCategories = categories
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+
+            Stream inputStream;
+            string fileName;
+
+            if (file != null && file.Length > 0)
+            {
+                inputStream = await SseHelper.ReadFileToMemoryStreamAsync(file);
+                fileName = file.FileName;
+            }
+            else
+            {
+                var defaultCsv = Path.Combine(
+                    env.WebRootPath,
+                    "Marketplace - Partner Manager Dashboard_Offer KPIs_Tabelle.csv");
+
+                if (!File.Exists(defaultCsv))
+                {
+                    await SseHelper.SendNoFileErrorAsync(writer);
+                    return;
+                }
+
+                inputStream = File.OpenRead(defaultCsv);
+                fileName = Path.GetFileName(defaultCsv);
+            }
+
+            using (inputStream)
+            {
+                await v2Service.CompareFromFileAsync(
+                    inputStream,
+                    fileName,
+                    options,
+                    SseHelper.CreateProgressCallback(writer),
+                    sessionId
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            await SseHelper.SendErrorAsync(writer, ex.Message);
+        }
+    }, "text/event-stream");
+});
+
+// Akakce price comparison V2 - Scrape.do search + Scrape.do fetch (no browser needed)
 app.MapPost("/api/akakce/price-compare-v2", async (HttpRequest request, AkakcePriceComparisonV2Service v2Service) =>
 {
     return Results.Stream(async (stream) =>
@@ -774,6 +851,13 @@ app.MapGet("/price-index", async (IWebHostEnvironment env) =>
     return Results.Content(content, "text/html; charset=utf-8");
 });
 
+app.MapGet("/retail-vs-marketplace", async (IWebHostEnvironment env) =>
+{
+    var filePath = Path.Combine(env.WebRootPath, "pages", "retail-vs-marketplace.html");
+    var content = await File.ReadAllTextAsync(filePath);
+    return Results.Content(content, "text/html; charset=utf-8");
+});
+
 // ============================================
 // STARTUP
 // ============================================
@@ -785,6 +869,7 @@ Console.WriteLine("   - Akakce Scraper: http://localhost:5000/akakce");
 Console.WriteLine("   - Akakce Search: http://localhost:5000/akakce-search");
 Console.WriteLine("   - Akakce Price Compare: http://localhost:5000/akakce (Price Compare mode)");
 Console.WriteLine("   - Price Index: http://localhost:5000/price-index");
+Console.WriteLine("   - Retail vs Marketplace: http://localhost:5000/retail-vs-marketplace");
 Console.WriteLine("   - Bulk Image Uploader: http://localhost:5000/bulk-image");
 Console.WriteLine("   - Hepsiburada Product Search: http://localhost:5000/hepsiburada-product-search");
 Console.WriteLine("Press Ctrl+C to stop the server");

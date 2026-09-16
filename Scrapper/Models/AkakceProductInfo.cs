@@ -64,7 +64,35 @@ public class AkakceProductInfo
     /// Number of sellers listing this product
     /// </summary>
     public int SellerCount { get; set; }
-    
+
+    /// <summary>
+    /// True market minimum taken from the JSON-LD AggregateOffer "lowPrice" field.
+    /// This covers every offer on the page, not just the ~10 the JSON-LD "offers"
+    /// array actually enumerates, so it must be preferred over Sellers.Min(Price).
+    /// </summary>
+    public decimal MarketLowestPrice { get; set; }
+
+    /// <summary>
+    /// True market maximum from the JSON-LD AggregateOffer "highPrice" field.
+    /// </summary>
+    public decimal MarketHighestPrice { get; set; }
+
+    /// <summary>
+    /// Total offer count reported by the JSON-LD AggregateOffer "offerCount" field.
+    /// Typically much larger than Sellers.Count (e.g. 139 vs 10).
+    /// </summary>
+    public int MarketOfferCount { get; set; }
+
+    /// <summary>
+    /// Prices from the "store prices" block of the product page, keyed by retailer
+    /// name (e.g. "MediaMarkt", "Teknosa", "A101"). These are first-party retail
+    /// listings and are rendered separately from the marketplace seller list, so
+    /// they never show up in <see cref="Sellers"/>.
+    /// Value = lowest price seen for that retailer.
+    /// </summary>
+    public Dictionary<string, decimal> StorePrices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+
     /// <summary>
     /// List of all sellers with their pricing and details
     /// </summary>

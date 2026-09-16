@@ -518,13 +518,13 @@ public class PriceIndexService
     }
 
     // Picks the delimiter with the most occurrences — covers comma, semicolon, tab
-    private static char DetectCsvDelimiter(string headerLine)
+    internal static char DetectCsvDelimiter(string headerLine)
     {
         char[] candidates = [',', ';', '\t'];
         return candidates.OrderByDescending(d => headerLine.Count(c => c == d)).First();
     }
 
-    private static string[] ParseCsvLine(string line, char delimiter)
+    internal static string[] ParseCsvLine(string line, char delimiter)
     {
         var fields  = new List<string>();
         var current = new System.Text.StringBuilder();

@@ -60,10 +60,10 @@ public class PriceComparisonRow
     /// <summary>True when the input price cell contained "stock out" or was empty.</summary>
     public bool IsStockOut { get; set; }
 
-    /// <summary>Product title as found on Akakçe.</summary>
+    /// <summary>Product title as found on Akakï¿½e.</summary>
     public string AkakceName { get; set; } = string.Empty;
 
-    /// <summary>Product page URL on Akakçe.</summary>
+    /// <summary>Product page URL on Akakï¿½e.</summary>
     public string AkakceUrl { get; set; } = string.Empty;
 
     /// <summary>
@@ -75,6 +75,88 @@ public class PriceComparisonRow
     /// <summary>Overall best price across all marketplaces (0 if none found).</summary>
     public decimal BestPrice => MarketplaceBestPrices.Count > 0 ? MarketplaceBestPrices.Values.Min() : 0;
 
+    // ---------------------------------------------------------------------
+    // Retail (1P) vs Marketplace (3P) comparison
+    //
+    // The source CSV holds MediaMarkt *Marketplace* offers (third-party
+    // sellers). The "MediaMarkt" entry on Akakce is MediaMarkt *Retail*
+    // (first-party). Those are two different things, so they are tracked
+    // separately here.
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// MediaMarkt Retail (1P) price as listed on Akakce, taken from the store-prices
+    /// block. 0 when MediaMarkt does not list this product.
+    /// </summary>
+    public decimal RetailPrice { get; set; }
+
+    /// <summary>
+    /// Seller name of the cheapest offer for this product in the source CSV
+    /// (i.e. which marketplace seller set <see cref="MyPrice"/>).
+    /// </summary>
+    public string CsvCheapestSeller { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True market minimum from the Akakce AggregateOffer, covering every offer on
+    /// the page rather than only the enumerated ones. Preferred over <see cref="BestPrice"/>.
+    /// </summary>
+    public decimal MarketLowestPrice { get; set; }
+
+    /// <summary>Total number of offers Akakce reports for this product.</summary>
+    public int MarketOfferCount { get; set; }
+
+    /// <summary>Marketplace of the cheapest enumerated seller (e.g. "Trendyol").</summary>
+    public string CheapestMarketplace { get; set; } = string.Empty;
+
+    /// <summary>Seller name of the cheapest enumerated seller.</summary>
+    public string CheapestSeller { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Cheapest enumerated price excluding every MediaMarkt entity (both Retail and
+    /// Pazar Yeri), i.e. the genuine competitor level. 0 when nothing qualifies.
+    /// </summary>
+    public decimal CheapestExcludingMediaMarkt { get; set; }
+
+    /// <summary>
+    /// Per-retailer prices from the store-prices block (MediaMarkt, Teknosa, A101, ...).
+    /// </summary>
+    public Dictionary<string, decimal> StorePrices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Effective market minimum: the AggregateOffer low price when present, otherwise
+    /// the best enumerated marketplace price.
+    /// </summary>
+    public decimal EffectiveMarketLowest => MarketLowestPrice > 0 ? MarketLowestPrice : BestPrice;
+
+    /// <summary>
+    /// HEADLINE METRIC. Percentage difference between MediaMarkt Retail on Akakce and
+    /// the cheapest Marketplace offer from the CSV, relative to the Marketplace price.
+    /// Positive = Retail is more expensive than our own marketplace sellers.
+    /// Null when either side is missing or the CSV row is a stock-out.
+    /// </summary>
+    public decimal? RetailVsMarketplacePercent =>
+        RetailPrice > 0 && MyPrice > 0 && !IsStockOut
+            ? Math.Round((RetailPrice - MyPrice) / MyPrice * 100, 2)
+            : null;
+
+    /// <summary>
+    /// Percentage difference between MediaMarkt Retail and the cheapest price anywhere
+    /// on Akakce. Positive = Retail is above the market floor.
+    /// </summary>
+    public decimal? RetailVsMarketPercent =>
+        RetailPrice > 0 && EffectiveMarketLowest > 0
+            ? Math.Round((RetailPrice - EffectiveMarketLowest) / EffectiveMarketLowest * 100, 2)
+            : null;
+
+    /// <summary>
+    /// Percentage difference between our cheapest CSV marketplace offer and the cheapest
+    /// price anywhere on Akakce. Positive = our marketplace offer is above the market floor.
+    /// </summary>
+    public decimal? MarketplaceVsMarketPercent =>
+        MyPrice > 0 && !IsStockOut && EffectiveMarketLowest > 0
+            ? Math.Round((MyPrice - EffectiveMarketLowest) / EffectiveMarketLowest * 100, 2)
+            : null;
+
     /// <summary>
     /// Delta percentage: (MyPrice - BestPrice) / BestPrice * 100.
     /// Positive = my price is higher than market best; negative = cheaper.
@@ -85,7 +167,16 @@ public class PriceComparisonRow
             ? Math.Round((MyPrice - BestPrice) / BestPrice * 100, 2)
             : null;
 
-    /// <summary>Error message when Akakçe search/scrape failed.</summary>
+    /// <summary>Confidence score of the accepted match, for auditing the report.</summary>
+    public int MatchScore { get; set; }
+
+    /// <summary>
+    /// Why the match was accepted (brand/model/attribute signals). Worth scanning when
+    /// a row's price looks wrong.
+    /// </summary>
+    public string MatchNotes { get; set; } = string.Empty;
+
+    /// <summary>Error message when Akakï¿½e search/scrape failed.</summary>
     public string? ErrorMessage { get; set; }
 
     public bool IsSuccess => string.IsNullOrEmpty(ErrorMessage);

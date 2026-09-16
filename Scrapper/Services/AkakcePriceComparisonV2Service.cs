@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,6 +26,7 @@ public class AkakcePriceComparisonV2Service
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _sessions = new();
 
     private readonly AkakceScrapeDoService _scrapeDoService;
+    private readonly AkakceHttpSearchService _searchService;
 
     private const int MAX_SEARCH_RESULTS_PER_QUERY = 12;
     private const int MAX_UNIQUE_CANDIDATES = 20;
@@ -51,9 +53,12 @@ public class AkakcePriceComparisonV2Service
         "silver", "black", "white"
     };
 
-    public AkakcePriceComparisonV2Service(AkakceScrapeDoService scrapeDoService)
+    public AkakcePriceComparisonV2Service(
+        AkakceScrapeDoService scrapeDoService,
+        AkakceHttpSearchService searchService)
     {
         _scrapeDoService = scrapeDoService;
+        _searchService = searchService;
     }
 
     public static void StopSession(string sessionId)
@@ -62,8 +67,25 @@ public class AkakcePriceComparisonV2Service
             cts.Cancel();
     }
 
-    public async Task CompareFromExcelAsync(
+    /// <summary>
+    /// Backwards-compatible entry point: compare an .xlsx input and emit the original
+    /// marketplace comparison report.
+    /// </summary>
+    public Task CompareFromExcelAsync(
         Stream excelStream,
+        Func<int, string, string, Task> onProgress,
+        string? sessionId = null) =>
+        CompareFromFileAsync(excelStream, "input.xlsx", new PriceComparisonOptions(), onProgress, sessionId);
+
+    /// <summary>
+    /// Match every product in the input against Akakce and emit a comparison report.
+    /// Accepts .csv or .xlsx; <paramref name="options"/> controls scope and which
+    /// report is produced.
+    /// </summary>
+    public async Task CompareFromFileAsync(
+        Stream inputStream,
+        string fileName,
+        PriceComparisonOptions options,
         Func<int, string, string, Task> onProgress,
         string? sessionId = null)
     {
@@ -75,33 +97,34 @@ public class AkakcePriceComparisonV2Service
 
         try
         {
-            await onProgress(1, "Reading Excel file...", "info");
+            var isCsv = fileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
+            await onProgress(1, $"Reading {(isCsv ? "CSV" : "Excel")} file...", "info");
 
-            var readResult = ReadInputExcel(excelStream);
+            var readResult = isCsv ? ReadInputCsv(inputStream) : ReadInputExcel(inputStream);
             var inputRows = readResult.Rows;
             int duplicatesSkipped = readResult.DuplicatesSkipped;
 
             if (inputRows.Count == 0)
             {
-                await onProgress(100, "No products found in the Excel file", "warning");
+                await onProgress(100, "No products found in the input file", "warning");
                 await SendComplete(onProgress, null, 0);
                 return;
             }
 
-            var dupMsg = duplicatesSkipped > 0 ? $" ({duplicatesSkipped} duplicate row(s) skipped)" : "";
-            await onProgress(4, $"Found {inputRows.Count} unique products{dupMsg}", "success");
+            var dupMsg = duplicatesSkipped > 0 ? $" ({duplicatesSkipped} duplicate offer row(s) collapsed)" : "";
+            await onProgress(3, $"Found {inputRows.Count} unique products{dupMsg}", "success");
 
-            await onProgress(5, "Warming up Akakce Selenium search...", "info");
+            inputRows = ApplyScope(inputRows, options, out var scopeMsg);
 
-            using var scraper = new AkakceScraper();
-            var warmupSuccess = await scraper.WarmupAsync(onProgress);
-
-            if (!warmupSuccess)
+            if (inputRows.Count == 0)
             {
-                await onProgress(100, "Could not connect to Edge browser.", "error");
+                await onProgress(100, "No products left after applying the category filter", "warning");
                 await SendComplete(onProgress, null, 0);
                 return;
             }
+
+            if (!string.IsNullOrEmpty(scopeMsg))
+                await onProgress(5, scopeMsg, "info");
 
             await onProgress(8, "Starting product matching...", "info");
 
@@ -109,23 +132,57 @@ public class AkakcePriceComparisonV2Service
             int unmatchedCount = 0;
             int searchFailureCount = 0;
             int detailFailureCount = 0;
+            int completedCount = 0;
 
             double progressBase = 10.0;
             double progressPerRow = 84.0 / inputRows.Count;
 
-            for (int i = 0; i < inputRows.Count; i++)
-            {
-                if (cts.Token.IsCancellationRequested)
-                    break;
+            // onProgress writes to a single SSE StreamWriter, which is not thread-safe -
+            // concurrent writes would interleave and corrupt the event stream. One gate
+            // serialises them.
+            using var progressGate = new SemaphoreSlim(1, 1);
 
-                var row = inputRows[i];
-                var pct = (int)Math.Min(94, progressBase + (i * progressPerRow));
+            async Task Report(int percent, string message, string type)
+            {
+                await progressGate.WaitAsync();
+                try { await onProgress(percent, message, type); }
+                finally { progressGate.Release(); }
+            }
+
+            // A slot per input row: workers finish out of order, but the report should
+            // still follow the input ordering, and every row must appear even if it failed.
+            var results = new PriceComparisonRow[inputRows.Count];
+
+            var parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = options.DegreeOfParallelism,
+                // Cancellation is handled per row instead, so a stopped run still
+                // produces a report containing everything finished so far.
+                CancellationToken = CancellationToken.None
+            };
+
+            await Parallel.ForEachAsync(
+                inputRows.Select((row, index) => (Row: row, Index: index)),
+                parallelOptions,
+                async (item, _) =>
+            {
+                var row = item.Row;
+                results[item.Index] = row;
+
+                if (cts.Token.IsCancellationRequested)
+                {
+                    row.ErrorMessage = "Cancelled";
+                    return;
+                }
+
+                var done = Interlocked.Increment(ref completedCount);
+                var pct = (int)Math.Min(94, progressBase + ((done - 1) * progressPerRow));
 
                 try
                 {
-                    await onProgress(
+                    await Report(
                         pct,
-                        $"[{i + 1}/{inputRows.Count}] Matching: {Truncate(row.SearchName, 70)}",
+                        $"[{done}/{inputRows.Count}] Matching: {Truncate(row.SearchName, 70)}",
                         "info");
 
                     var fingerprint = BuildFingerprint(row);
@@ -134,27 +191,22 @@ public class AkakcePriceComparisonV2Service
                     if (queries.Count == 0)
                     {
                         row.ErrorMessage = "No usable search query could be built";
-                        rows.Add(row);
-                        unmatchedCount++;
-                        continue;
+                        Interlocked.Increment(ref unmatchedCount);
+                        return;
                     }
 
                     var listingCandidates = await SearchAndScoreCandidatesAsync(
-                        scraper,
                         row,
                         fingerprint,
                         queries,
-                        onProgress,
-                        pct,
                         cts.Token);
 
                     if (listingCandidates.Count == 0)
                     {
                         row.ErrorMessage = "No relevant search candidates found";
-                        rows.Add(row);
-                        unmatchedCount++;
-                        searchFailureCount++;
-                        continue;
+                        Interlocked.Increment(ref unmatchedCount);
+                        Interlocked.Increment(ref searchFailureCount);
+                        return;
                     }
 
                     var shortlisted = listingCandidates
@@ -162,11 +214,6 @@ public class AkakcePriceComparisonV2Service
                         .ThenByDescending(x => x.TokenOverlapCount)
                         .Take(TOP_CANDIDATES_TO_VALIDATE)
                         .ToList();
-
-                    await onProgress(
-                        pct,
-                        $"Validating top {shortlisted.Count} candidate(s) via detail pages...",
-                        "info");
 
                     var validated = new List<ValidatedCandidate>();
 
@@ -177,7 +224,10 @@ public class AkakcePriceComparisonV2Service
 
                         try
                         {
-                            var product = await _scrapeDoService.ScrapeProductAsync(candidate.Candidate.Url);
+                            // row.SearchName steers variant selection when the candidate
+                            // turns out to be a variant group page.
+                            var product = await _scrapeDoService.ScrapeProductAsync(
+                                candidate.Candidate.Url, row.SearchName, cts.Token);
 
                             if (product == null)
                             {
@@ -187,7 +237,7 @@ public class AkakcePriceComparisonV2Service
                                     candidate.Reasons.Append("Detail page returned null").ToList(),
                                     null));
 
-                                detailFailureCount++;
+                                Interlocked.Increment(ref detailFailureCount);
                             }
                             else
                             {
@@ -208,14 +258,14 @@ public class AkakcePriceComparisonV2Service
                                 candidate.Reasons.Append($"Detail validation failed: {ex.Message}").ToList(),
                                 null));
 
-                            detailFailureCount++;
+                            Interlocked.Increment(ref detailFailureCount);
                         }
 
                         try
                         {
                             await Task.Delay(SCRAPEDO_DELAY_MS, cts.Token);
                         }
-                        catch (TaskCanceledException)
+                        catch (OperationCanceledException)
                         {
                             break;
                         }
@@ -224,16 +274,14 @@ public class AkakcePriceComparisonV2Service
                     if (cts.Token.IsCancellationRequested)
                     {
                         row.ErrorMessage = "Cancelled";
-                        rows.Add(row);
-                        break;
+                        return;
                     }
 
                     if (validated.Count == 0)
                     {
                         row.ErrorMessage = "No candidate detail pages could be validated";
-                        rows.Add(row);
-                        unmatchedCount++;
-                        continue;
+                        Interlocked.Increment(ref unmatchedCount);
+                        return;
                     }
 
                     var orderedValidated = validated
@@ -246,10 +294,9 @@ public class AkakcePriceComparisonV2Service
                     if (IsConfidentMatch(best, second))
                     {
                         ApplyAcceptedMatch(row, best);
-                        rows.Add(row);
-                        matchedCount++;
+                        Interlocked.Increment(ref matchedCount);
 
-                        await onProgress(
+                        await Report(
                             pct,
                             $"Matched: {Truncate(best.Product?.Name ?? best.Candidate.Title, 70)} [score={best.Score}]",
                             "success");
@@ -257,33 +304,28 @@ public class AkakcePriceComparisonV2Service
                     else
                     {
                         row.ErrorMessage = BuildNoConfidenceMessage(orderedValidated);
-                        rows.Add(row);
-                        unmatchedCount++;
+                        Interlocked.Increment(ref unmatchedCount);
 
-                        await onProgress(
+                        await Report(
                             pct,
                             $"No confident match: {Truncate(row.SearchName, 60)}",
                             "warning");
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    row.ErrorMessage = "Cancelled";
+                }
                 catch (Exception ex)
                 {
                     row.ErrorMessage = ex.Message;
-                    rows.Add(row);
-                    unmatchedCount++;
+                    Interlocked.Increment(ref unmatchedCount);
 
                     Console.WriteLine($"[PriceCompV2] Row failed for '{row.SearchName}': {ex.Message}");
                 }
-            }
+            });
 
-            foreach (var row in inputRows)
-            {
-                if (!rows.Contains(row))
-                {
-                    row.ErrorMessage = "Cancelled";
-                    rows.Add(row);
-                }
-            }
+            rows.AddRange(results.Where(r => r != null));
 
             await onProgress(
                 95,
@@ -291,21 +333,27 @@ public class AkakcePriceComparisonV2Service
                 "info");
 
             var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var fileName = $"AkakcePriceComparison_{timestamp}.xlsx";
-            var filePath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
+            var outputFileName = options.RetailReport
+                ? $"RetailVsMarketplace_{timestamp}.xlsx"
+                : $"AkakcePriceComparison_{timestamp}.xlsx";
+            var filePath = Path.Combine(Directory.GetCurrentDirectory(), outputFileName);
 
-            var exporter = new AkakcePriceComparisonExcelExporter();
-            exporter.Export(rows, filePath);
+            if (options.RetailReport)
+                new RetailVsMarketplaceExcelExporter().Export(rows, filePath);
+            else
+                new AkakcePriceComparisonExcelExporter().Export(rows, filePath);
 
             var done = rows.Count(r => r.IsSuccess);
             var failed = rows.Count - done;
+            var withRetail = rows.Count(r => r.RetailPrice > 0);
 
             await onProgress(
                 100,
-                $"Done! {done} matched, {failed} unmatched/failed. SearchFailures={searchFailureCount}, DetailFailures={detailFailureCount}",
+                $"Done! {done} matched, {failed} unmatched/failed, {withRetail} with a MediaMarkt Retail price. " +
+                $"SearchFailures={searchFailureCount}, DetailFailures={detailFailureCount}",
                 "success");
 
-            await SendComplete(onProgress, fileName, done);
+            await SendComplete(onProgress, outputFileName, done);
         }
         catch (Exception ex)
         {
@@ -326,27 +374,26 @@ public class AkakcePriceComparisonV2Service
     // =========================
 
     private async Task<List<ScoredCandidate>> SearchAndScoreCandidatesAsync(
-        AkakceScraper scraper,
         PriceComparisonRow row,
         ProductFingerprint fingerprint,
         List<string> queries,
-        Func<int, string, string, Task> onProgress,
-        int pct,
         CancellationToken cancellationToken)
     {
         var aggregated = new Dictionary<string, ScoredCandidate>(StringComparer.OrdinalIgnoreCase);
 
+        // Deliberately silent: at four queries per product this would add thousands of
+        // interleaved lines to the live log on a full run without telling the operator
+        // anything they act on.
         foreach (var query in queries)
         {
             if (cancellationToken.IsCancellationRequested)
                 break;
 
-            await onProgress(pct, $"Searching Akakce with query: {Truncate(query, 80)}", "info");
-
             List<(string Title, string Url, decimal ListingPrice)> rawCandidates;
             try
             {
-                rawCandidates = await scraper.SearchProductCandidatesAsync(query, MAX_SEARCH_RESULTS_PER_QUERY);
+                rawCandidates = await _searchService.SearchProductCandidatesAsync(
+                    query, MAX_SEARCH_RESULTS_PER_QUERY, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -588,7 +635,23 @@ public class AkakcePriceComparisonV2Service
             if (modelOverlap.Count > 0)
             {
                 score += 18;
-                detailReasons.Add($"Model confirmed on detail page: {string.Join(", ", modelOverlap)}");
+
+                // Separate a real part number from an incidental one. "ddr5" or "16gb"
+                // overlapping means little; "ax5u6400c3216g-clarbk" overlapping means
+                // this is the same product, and IsConfidentMatch treats it that way.
+                var distinctive = modelOverlap.Where(IsDistinctiveSku).ToList();
+                if (distinctive.Count > 0)
+                    detailReasons.Add($"Distinctive SKU confirmed on detail page: {string.Join(", ", distinctive)}");
+                else
+                    detailReasons.Add($"Model confirmed on detail page: {string.Join(", ", modelOverlap)}");
+            }
+            else if (FindSkuInTitle(source.ModelTokens, detailNorm) is { } sku)
+            {
+                // Exact token comparison misses SKUs that the two titles punctuate
+                // differently ("AX5U6400C3216G-CLARBK" tokenised one way on our side and
+                // another on Akakce's), so fall back to containment.
+                score += 22;
+                detailReasons.Add($"Distinctive SKU confirmed on detail page: {sku}");
             }
             else if (detailModels.Count > 0)
             {
@@ -614,6 +677,8 @@ public class AkakcePriceComparisonV2Service
             }
         }
 
+        score += ScoreColourAgreement(source.NormalizedTitle, detailNorm, detailReasons);
+
         var bestDetailPrice = GetBestProductPrice(product);
         score += ScorePriceSanity(row.MyPrice, bestDetailPrice, out var detailPriceReason);
         if (!string.IsNullOrWhiteSpace(detailPriceReason))
@@ -633,8 +698,33 @@ public class AkakcePriceComparisonV2Service
         if (best.Product == null || !best.Product.IsSuccess)
             return false;
 
-        if (best.Score < ACCEPT_SCORE_THRESHOLD)
+        var skuConfirmed = best.Reasons.Any(r =>
+            r.StartsWith("Distinctive SKU confirmed", StringComparison.OrdinalIgnoreCase));
+
+        // An exact manufacturer part number is stronger evidence than any amount of
+        // title similarity, so it clears the score threshold on its own. Without this,
+        // rows whose Akakce listing is titled differently to ours - "ADATA
+        // AX5U6400C3216G-CLARBK ... PC Ram" against "XPG Lancer RGB 16 GB ...
+        // AX5U6400C3216G-CLARBK" - scored 63 against a threshold of 66 and were
+        // reported as unmatched despite the part numbers being identical.
+        // Conflicts below still veto.
+        if (!skuConfirmed && best.Score < ACCEPT_SCORE_THRESHOLD)
             return false;
+
+        // A recorded conflict blocks acceptance outright, however far ahead the
+        // candidate is on points.
+        //
+        // This used to be checked only in the tie-break branch below, so a candidate
+        // that led by five points was accepted even when the detail page contradicted
+        // the source. That is how an "iPad Pro M5 256GB" row matched an "iPad Air
+        // 256GB" listing at score 114: enough shared tokens (apple/ipad/256gb/wi-fi/11)
+        // to outweigh a -10 model mismatch. In a pricing report a confidently wrong
+        // price is worse than a gap, and unmatched rows are already flagged for review.
+        if (CountHardConflicts(best.Reasons) > 0)
+            return false;
+
+        if (skuConfirmed)
+            return true;
 
         if (second == null)
             return true;
@@ -648,13 +738,96 @@ public class AkakcePriceComparisonV2Service
             r.Contains("Strong title similarity", StringComparison.OrdinalIgnoreCase) ||
             r.Contains("confirmed on detail page", StringComparison.OrdinalIgnoreCase));
 
-        var hardConflicts = best.Reasons.Count(r =>
+        return best.Score >= 70 && strongSignals >= 2;
+    }
+
+    private static readonly string[] ColourWords =
+    [
+        "siyah", "beyaz", "mavi", "kirmizi", "kırmızı", "yesil", "yeşil", "gri",
+        "lacivert", "pembe", "mor", "sari", "sarı", "turuncu", "altin", "altın",
+        "gumus", "gümüş", "bej", "kahverengi", "black", "white", "blue", "red",
+        "green", "grey", "gray", "silver", "gold", "pink"
+    ];
+
+    /// <summary>
+    /// Nudge candidates towards the right colour variant.
+    /// </summary>
+    /// <remarks>
+    /// Akakce lists each colour of a speaker or phone as its own product, but colour
+    /// words are stop-words for tokenising, so the scorer cannot tell them apart:
+    /// "Anker SoundCore Glow" (plain), "... Siyah" and "... Kirmizi" all tied on 66
+    /// against a "Mavi" source and the row was dropped as ambiguous. Comparing colours
+    /// directly on the raw titles breaks that tie; an untitled-colour listing is left
+    /// neutral because it is usually the parent product.
+    /// </remarks>
+    private static int ScoreColourAgreement(string sourceNorm, string detailNorm, List<string> reasons)
+    {
+        var sourceColour = ColourWords.FirstOrDefault(c => ContainsWord(sourceNorm, c));
+        if (sourceColour == null) return 0;
+
+        if (ContainsWord(detailNorm, sourceColour))
+        {
+            reasons.Add($"Colour confirmed on detail page ({sourceColour})");
+            return 8;
+        }
+
+        var detailColour = ColourWords.FirstOrDefault(c => ContainsWord(detailNorm, c));
+        if (detailColour == null) return 0;
+
+        // Deliberately avoids the words that CountHardConflicts treats as vetoes: the
+        // wrong colour of the right model almost always carries the same price, so this
+        // should only break ties, never reject a row outright.
+        reasons.Add($"Different colour on detail page (src={sourceColour}, detail={detailColour})");
+        return -8;
+    }
+
+    private static bool ContainsWord(string haystack, string word) =>
+        Regex.IsMatch(haystack, $@"\b{Regex.Escape(word)}\b", RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// A number followed by a unit - "6400mhz", "18000btu", "256gb". These look like
+    /// part numbers by length and character mix but are specifications that unrelated
+    /// products share, so they must never trigger the SKU shortcut.
+    /// </summary>
+    private static readonly Regex SpecTokenRegex = new(@"^\d+[a-z]{1,4}$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// True for a token that identifies one product rather than describing it: long
+    /// enough to be a part number, mixing letters and digits, and not a bare spec.
+    /// </summary>
+    private static bool IsDistinctiveSku(string token) =>
+        token.Length >= 6
+        && ContainsLetterAndDigit(token)
+        && !SpecTokenRegex.IsMatch(token);
+
+    /// <summary>
+    /// Find a distinctive SKU from the source that appears verbatim in a candidate title.
+    /// Only long mixed letter-and-digit tokens qualify: short ones like "16gb" or "40w"
+    /// are specifications shared by unrelated products, not identifiers.
+    /// </summary>
+    private static string? FindSkuInTitle(IEnumerable<string> modelTokens, string normalizedTitle)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedTitle)) return null;
+
+        var stripped = DigitsLettersOnly(normalizedTitle);
+
+        return modelTokens
+            .Where(IsDistinctiveSku)
+            .OrderByDescending(t => t.Length)
+            .FirstOrDefault(t =>
+                normalizedTitle.Contains(t, StringComparison.OrdinalIgnoreCase) ||
+                stripped.Contains(DigitsLettersOnly(t), StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Drop punctuation so "ax5u-6400/c32" and "ax5u6400c32" compare equal.</summary>
+    private static string DigitsLettersOnly(string input) =>
+        new(input.Where(char.IsLetterOrDigit).ToArray());
+
+    private static int CountHardConflicts(IEnumerable<string> reasons) =>
+        reasons.Count(r =>
             r.Contains("mismatch", StringComparison.OrdinalIgnoreCase) ||
             r.Contains("conflict", StringComparison.OrdinalIgnoreCase) ||
             r.Contains("differs", StringComparison.OrdinalIgnoreCase));
-
-        return best.Score >= 70 && strongSignals >= 2 && hardConflicts == 0;
-    }
 
     private static void ApplyAcceptedMatch(PriceComparisonRow row, ValidatedCandidate best)
     {
@@ -662,21 +835,74 @@ public class AkakcePriceComparisonV2Service
         row.AkakceName = product.Name;
         row.AkakceUrl = product.ProductUrl;
         row.ErrorMessage = string.Empty;
+        row.MatchScore = best.Score;
+        row.MatchNotes = string.Join(" | ", best.Reasons);
 
         CollectMarketplacePrices(product, row);
+        CollectRetailAndAggregate(product, row);
+    }
+
+    /// <summary>
+    /// Copy the aggregate price summary and the first-party retailer prices onto the row.
+    ///
+    /// The MediaMarkt entry in the store-prices block is MediaMarkt Retail (1P) - a
+    /// different business to the Marketplace (3P) sellers the input CSV describes,
+    /// which is exactly the comparison this report exists to make.
+    /// </summary>
+    private static void CollectRetailAndAggregate(AkakceProductInfo product, PriceComparisonRow row)
+    {
+        row.MarketLowestPrice = product.MarketLowestPrice;
+        row.MarketOfferCount = product.MarketOfferCount;
+
+        foreach (var kv in product.StorePrices)
+            row.StorePrices[kv.Key] = kv.Value;
+
+        foreach (var kv in product.StorePrices)
+        {
+            if (!IsMediaMarktRetail(kv.Key)) continue;
+            if (row.RetailPrice <= 0 || kv.Value < row.RetailPrice)
+                row.RetailPrice = kv.Value;
+        }
+    }
+
+    /// <summary>
+    /// True for the MediaMarkt first-party store entry. Deliberately does NOT match
+    /// "Media Markt Pazar Yeri", which is the third-party marketplace.
+    /// </summary>
+    private static bool IsMediaMarktRetail(string name)
+    {
+        var normalized = NormalizeMarketplace(name);
+        return normalized.Equals("Media Markt", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>True for any MediaMarkt entity, Retail or Pazar Yeri.</summary>
+    private static bool IsAnyMediaMarkt(string name)
+    {
+        var normalized = NormalizeMarketplace(name);
+        return normalized.StartsWith("Media Markt", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildNoConfidenceMessage(List<ValidatedCandidate> validated)
     {
-        var ordered = validated
-            .OrderByDescending(x => x.Score)
-            .Take(3)
+        var ordered = validated.OrderByDescending(x => x.Score).Take(3).ToList();
+        if (ordered.Count == 0)
+            return "No confident match";
+
+        var summary = ordered
             .Select(x => $"[{x.Score}] {Truncate(x.Product?.Name ?? x.Candidate.Title, 55)}")
             .ToList();
 
-        return ordered.Count == 0
-            ? "No confident match"
-            : $"No confident match. Top candidates: {string.Join(" | ", ordered)}";
+        // Spell out why the leader fell short. Without this a reviewer only sees a
+        // number and cannot tell a genuine near-miss from a wrong product.
+        var best = ordered[0];
+        var verdict = best.Score < ACCEPT_SCORE_THRESHOLD
+            ? $"below threshold ({best.Score} < {ACCEPT_SCORE_THRESHOLD})"
+            : CountHardConflicts(best.Reasons) > 0
+                ? "blocked by conflict"
+                : "too close to runner-up";
+
+        return $"No confident match ({verdict}). Top candidates: {string.Join(" | ", summary)}"
+             + $" || Best-candidate signals: {string.Join("; ", best.Reasons)}";
     }
 
     // =========================
@@ -722,12 +948,31 @@ public class AkakcePriceComparisonV2Service
                 queries.Add(trimmed);
         }
 
-        // 1) Brand + model tokens
+        // 1) Brand + the most distinctive model tokens, plus any attributes that add
+        //    something new.
+        //
+        //    ModelTokens is an unordered set that frequently overlaps Attributes, so
+        //    taking two of each blindly produced queries like "ANKER 40w 40w" and
+        //    "APPLE 256gb mdwk4tu/a 256gb 12gb". Ordering by distinctiveness puts the
+        //    real SKU first, and de-duplicating keeps the query clean.
         if (!string.IsNullOrWhiteSpace(row.SourceProductBrand) && fp.ModelTokens.Count > 0)
         {
-            var modelPart = string.Join(" ", fp.ModelTokens.Take(2));
-            var attrPart = string.Join(" ", fp.Attributes.Values.Take(2));
-            Add($"{row.SourceProductBrand} {modelPart} {attrPart}".Trim());
+            var parts = new List<string>();
+
+            void AddPart(string? value)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return;
+                if (parts.Any(p => p.Equals(value, StringComparison.OrdinalIgnoreCase))) return;
+                parts.Add(value.Trim());
+            }
+
+            foreach (var token in RankModelTokens(fp.ModelTokens).Take(2))
+                AddPart(token);
+
+            foreach (var attribute in fp.Attributes.Values.Take(2))
+                AddPart(attribute);
+
+            Add($"{row.SourceProductBrand} {string.Join(" ", parts)}".Trim());
         }
 
         // 2) Brand + compact title
@@ -742,6 +987,17 @@ public class AkakcePriceComparisonV2Service
 
         return queries;
     }
+
+    /// <summary>
+    /// Order model tokens so the ones that actually identify a product come first:
+    /// mixed letters-and-digits SKUs ("mdwk4tu", "ax5u6400c3216g") beat bare capacity
+    /// figures ("256gb", "40w"), and longer beats shorter.
+    /// </summary>
+    private static IEnumerable<string> RankModelTokens(IEnumerable<string> modelTokens) =>
+        modelTokens
+            .OrderByDescending(ContainsLetterAndDigit)
+            .ThenByDescending(t => t.Length)
+            .ThenBy(t => t, StringComparer.OrdinalIgnoreCase);
 
     private static string BuildCompactSearchTitle(string? raw, int keep)
     {
@@ -1056,12 +1312,28 @@ public class AkakcePriceComparisonV2Service
             ? product.Variants.SelectMany(v => v.Sellers)
             : product.Sellers;
 
-        foreach (var seller in allSellers.Where(s => s.InStock && s.Price > 0))
+        var inStock = allSellers.Where(s => s.InStock && s.Price > 0).ToList();
+
+        foreach (var seller in inStock)
         {
             var mp = NormalizeMarketplace(seller.Marketplace);
             if (!row.MarketplaceBestPrices.TryGetValue(mp, out var existing) || seller.Price < existing)
                 row.MarketplaceBestPrices[mp] = seller.Price;
         }
+
+        if (inStock.Count == 0) return;
+
+        var cheapest = inStock.OrderBy(s => s.Price).First();
+        row.CheapestMarketplace = NormalizeMarketplace(cheapest.Marketplace);
+        row.CheapestSeller = cheapest.SellerName;
+
+        var competitor = inStock
+            .Where(s => !IsAnyMediaMarkt(s.Marketplace))
+            .Select(s => s.Price)
+            .DefaultIfEmpty(0m)
+            .Min();
+
+        row.CheapestExcludingMediaMarkt = competitor;
     }
 
     private static string NormalizeMarketplace(string raw)
@@ -1110,6 +1382,202 @@ public class AkakcePriceComparisonV2Service
         string.IsNullOrWhiteSpace(s) ? string.Empty : s.Length > max ? s[..max] + "..." : s;
 
     // =========================
+    // Scope
+    // =========================
+
+    /// <summary>
+    /// Narrow the work set to the requested categories and product cap.
+    /// </summary>
+    /// <remarks>
+    /// A pilot run takes a round-robin slice across Focus Categories rather than the
+    /// first N alphabetically. The input is heavily skewed - IT Acc. alone is roughly a
+    /// third of it - so an alphabetical head would validate matching against one kind of
+    /// product and tell you very little about the rest.
+    /// </remarks>
+    private static List<PriceComparisonRow> ApplyScope(
+        List<PriceComparisonRow> rows,
+        PriceComparisonOptions options,
+        out string message)
+    {
+        message = string.Empty;
+        var parts = new List<string>();
+
+        if (options.FocusCategories is { Count: > 0 })
+        {
+            rows = rows
+                .Where(r => options.FocusCategories.Contains(r.FocusCategory.Trim()))
+                .ToList();
+
+            parts.Add($"category filter: {string.Join(", ", options.FocusCategories)}");
+        }
+
+        if (options.MaxProducts is > 0 && rows.Count > options.MaxProducts)
+        {
+            var groups = rows
+                .GroupBy(r => r.FocusCategory, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.ToList())
+                .ToList();
+
+            var sampled = new List<PriceComparisonRow>();
+            for (int i = 0; sampled.Count < options.MaxProducts; i++)
+            {
+                bool tookAny = false;
+                foreach (var group in groups)
+                {
+                    if (i >= group.Count) continue;
+
+                    sampled.Add(group[i]);
+                    tookAny = true;
+
+                    if (sampled.Count >= options.MaxProducts) break;
+                }
+
+                if (!tookAny) break;
+            }
+
+            rows = sampled;
+            parts.Add($"pilot sample of {rows.Count} across {groups.Count} categories");
+        }
+
+        if (parts.Count > 0)
+            message = $"Scope - {string.Join("; ", parts)} => {rows.Count} product(s)";
+
+        return rows;
+    }
+
+    // =========================
+    // CSV reading
+    // =========================
+
+    /// <summary>
+    /// Read the Offer KPI export in CSV form.
+    /// </summary>
+    /// <remarks>
+    /// Reuses the quote-aware splitter from <see cref="PriceIndexService"/> rather than
+    /// splitting on commas: several hundred product names contain a comma inside a
+    /// quoted field (e.g. "... El Blender Seti Siyah, Gri"), which a naive split corrupts.
+    /// </remarks>
+    private static (List<PriceComparisonRow> Rows, int DuplicatesSkipped) ReadInputCsv(Stream stream)
+    {
+        var selectedRows = new Dictionary<string, PriceComparisonRow>(StringComparer.OrdinalIgnoreCase);
+        int duplicatesSkipped = 0;
+
+        // detectEncodingFromByteOrderMarks strips the UTF-8 BOM this export carries.
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+
+        var headerLine = reader.ReadLine();
+        if (string.IsNullOrWhiteSpace(headerLine))
+            return ([], 0);
+
+        var delimiter = PriceIndexService.DetectCsvDelimiter(headerLine);
+        var headerFields = PriceIndexService.ParseCsvLine(headerLine, delimiter);
+
+        var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < headerFields.Length; i++)
+        {
+            var name = headerFields[i].Trim();
+            if (!string.IsNullOrWhiteSpace(name) && !headers.ContainsKey(name))
+                headers[name] = i;
+        }
+
+        foreach (var required in RequiredColumns)
+        {
+            if (!headers.ContainsKey(required))
+                throw new InvalidOperationException($"Required column '{required}' not found in the CSV.");
+        }
+
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            var fields = PriceIndexService.ParseCsvLine(line, delimiter);
+
+            string Get(string column) =>
+                headers.TryGetValue(column, out var idx) && idx < fields.Length
+                    ? fields[idx].Trim()
+                    : string.Empty;
+
+            var productName = Get("Product Name");
+            if (string.IsNullOrWhiteSpace(productName)) continue;
+
+            var row = BuildRow(Get, productName);
+            AddOrReplace(selectedRows, row, ref duplicatesSkipped);
+        }
+
+        return (OrderRows(selectedRows), duplicatesSkipped);
+    }
+
+    /// <summary>
+    /// Build a comparison row from a column accessor, shared by the CSV and Excel readers.
+    /// </summary>
+    private static PriceComparisonRow BuildRow(Func<string, string> get, string productName)
+    {
+        var (price, isStockOut) = ParsePrice(get("Offer Total Price"));
+        var sellerName = get("Seller Name");
+
+        return new PriceComparisonRow
+        {
+            OfferId = get("Offer id"),
+            FocusCategory = get("Focus Category"),
+            CategoryLabel = get("Category Label"),
+            Gtin = get("gtin"),
+            SourceProductId = get("Product id"),
+            SourceProductBrand = get("Product Brand"),
+            SearchName = productName,
+            TotalActiveOffers = get("Total Active Offers"),
+            SourceStock = get("Stock"),
+            WinnerAssortmentType = get("Winner Assortment Type"),
+            MyPrice = price,
+            IsStockOut = isStockOut,
+            OfferScoreRank = get("Offer Score Rank"),
+            SourceSellerName = sellerName,
+            CsvCheapestSeller = sellerName,
+            ProductSoldItems30d = get("Product - Sold items (30d)"),
+            ProductGmvInclShipping30d = get("Product - GMV incl. Shipping (30d)"),
+            SessionsByProductWithPdp30d = get("Sessions by Product with PDP (30d)"),
+            SessionsByProductWithAddToCartInPdp30d = get("Sessions by Product with Add to Cart in pdp (30d)")
+        };
+    }
+
+    /// <summary>
+    /// Collapse the offer-level input to one row per product, keeping the cheapest
+    /// in-stock offer. That surviving offer is what "our marketplace price" means.
+    /// </summary>
+    private static void AddOrReplace(
+        Dictionary<string, PriceComparisonRow> selected,
+        PriceComparisonRow row,
+        ref int duplicatesSkipped)
+    {
+        var key = BuildDedupeKey(row);
+
+        if (selected.TryGetValue(key, out var existing))
+        {
+            duplicatesSkipped++;
+            if (ShouldReplace(existing, row))
+                selected[key] = row;
+            return;
+        }
+
+        selected[key] = row;
+    }
+
+    private static List<PriceComparisonRow> OrderRows(Dictionary<string, PriceComparisonRow> selected) =>
+        selected.Values
+            .OrderBy(r => r.SearchName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static readonly string[] RequiredColumns =
+    [
+        "Offer id", "Focus Category", "Category Label", "gtin", "Product id",
+        "Product Brand", "Product Name", "Total Active Offers", "Stock",
+        "Winner Assortment Type", "Offer Total Price", "Offer Score Rank", "Seller Name",
+        "Product - Sold items (30d)", "Product - GMV incl. Shipping (30d)",
+        "Sessions by Product with PDP (30d)",
+        "Sessions by Product with Add to Cart in pdp (30d)"
+    ];
+
+    // =========================
     // Excel reading
     // =========================
 
@@ -1125,56 +1593,30 @@ public class AkakcePriceComparisonV2Service
             if (ws == null) return (result, 0);
 
             var rowCount = ws.Dimension?.Rows ?? 0;
-            var columnMap = GetColumnMap(ws);
+            var headers = GetHeaderMap(ws);
+
+            foreach (var required in RequiredColumns)
+            {
+                if (!headers.ContainsKey(required))
+                    throw new InvalidOperationException($"Required column '{required}' not found.");
+            }
+
             var selectedRows = new Dictionary<string, PriceComparisonRow>(StringComparer.OrdinalIgnoreCase);
 
             for (int r = 2; r <= rowCount; r++)
             {
-                var productName = GetCell(ws, r, columnMap.ProductName);
+                int currentRow = r;
+                string Get(string column) =>
+                    headers.TryGetValue(column, out var col) ? GetCell(ws, currentRow, col) : string.Empty;
+
+                var productName = Get("Product Name");
                 if (string.IsNullOrWhiteSpace(productName))
                     continue;
 
-                var offerTotalPriceRaw = GetCell(ws, r, columnMap.OfferTotalPrice);
-                var (price, isStockOut) = ParsePrice(offerTotalPriceRaw);
-
-                var row = new PriceComparisonRow
-                {
-                    OfferId = GetCell(ws, r, columnMap.OfferId),
-                    FocusCategory = GetCell(ws, r, columnMap.FocusCategory),
-                    CategoryLabel = GetCell(ws, r, columnMap.CategoryLabel),
-                    Gtin = GetCell(ws, r, columnMap.Gtin),
-                    SourceProductId = GetCell(ws, r, columnMap.ProductId),
-                    SourceProductBrand = GetCell(ws, r, columnMap.ProductBrand),
-                    SearchName = productName,
-                    TotalActiveOffers = GetCell(ws, r, columnMap.TotalActiveOffers),
-                    SourceStock = GetCell(ws, r, columnMap.Stock),
-                    WinnerAssortmentType = GetCell(ws, r, columnMap.WinnerAssortmentType),
-                    MyPrice = price,
-                    IsStockOut = isStockOut,
-                    OfferScoreRank = GetCell(ws, r, columnMap.OfferScoreRank),
-                    SourceSellerName = GetCell(ws, r, columnMap.SellerName),
-                    ProductSoldItems30d = GetCell(ws, r, columnMap.ProductSoldItems30d),
-                    ProductGmvInclShipping30d = GetCell(ws, r, columnMap.ProductGmvInclShipping30d),
-                    SessionsByProductWithPdp30d = GetCell(ws, r, columnMap.SessionsByProductWithPdp30d),
-                    SessionsByProductWithAddToCartInPdp30d = GetCell(ws, r, columnMap.SessionsByProductWithAddToCartInPdp30d)
-                };
-
-                var dedupeKey = BuildDedupeKey(row);
-
-                if (selectedRows.TryGetValue(dedupeKey, out var existing))
-                {
-                    duplicatesSkipped++;
-                    if (ShouldReplace(existing, row))
-                        selectedRows[dedupeKey] = row;
-                    continue;
-                }
-
-                selectedRows[dedupeKey] = row;
+                AddOrReplace(selectedRows, BuildRow(Get, productName), ref duplicatesSkipped);
             }
 
-            result = selectedRows.Values
-                .OrderBy(r => r.SearchName, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            result = OrderRows(selectedRows);
         }
         catch (Exception ex)
         {
@@ -1210,7 +1652,7 @@ public class AkakcePriceComparisonV2Service
     private static string GetCell(ExcelWorksheet ws, int row, int col) =>
         col <= 0 ? string.Empty : ws.Cells[row, col].Value?.ToString()?.Trim() ?? string.Empty;
 
-    private static ColumnMap GetColumnMap(ExcelWorksheet ws)
+    private static Dictionary<string, int> GetHeaderMap(ExcelWorksheet ws)
     {
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var colCount = ws.Dimension?.Columns ?? 0;
@@ -1222,38 +1664,8 @@ public class AkakcePriceComparisonV2Service
                 headers[h] = c;
         }
 
-        return new ColumnMap(
-            Col(headers, "Offer id"),
-            Col(headers, "Focus Category"),
-            Col(headers, "Category Label"),
-            Col(headers, "gtin"),
-            Col(headers, "Product id"),
-            Col(headers, "Product Brand"),
-            Col(headers, "Product Name"),
-            Col(headers, "Total Active Offers"),
-            Col(headers, "Stock"),
-            Col(headers, "Winner Assortment Type"),
-            Col(headers, "Offer Total Price"),
-            Col(headers, "Offer Score Rank"),
-            Col(headers, "Seller Name"),
-            Col(headers, "Product - Sold items (30d)"),
-            Col(headers, "Product - GMV incl. Shipping (30d)"),
-            Col(headers, "Sessions by Product with PDP (30d)"),
-            Col(headers, "Sessions by Product with Add to Cart in pdp (30d)"));
+        return headers;
     }
-
-    private static int Col(Dictionary<string, int> h, string name) =>
-        h.TryGetValue(name, out var c)
-            ? c
-            : throw new InvalidOperationException($"Required column '{name}' not found.");
-
-    private readonly record struct ColumnMap(
-        int OfferId, int FocusCategory, int CategoryLabel, int Gtin,
-        int ProductId, int ProductBrand, int ProductName,
-        int TotalActiveOffers, int Stock, int WinnerAssortmentType,
-        int OfferTotalPrice, int OfferScoreRank, int SellerName,
-        int ProductSoldItems30d, int ProductGmvInclShipping30d,
-        int SessionsByProductWithPdp30d, int SessionsByProductWithAddToCartInPdp30d);
 
     private sealed record ProductFingerprint(
         string OriginalTitle,

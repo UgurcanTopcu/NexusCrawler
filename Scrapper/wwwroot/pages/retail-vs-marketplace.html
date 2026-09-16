@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retail vs Marketplace</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+            min-height: 100vh;
+            color: #e2e8f0;
+            padding: 20px;
+        }
+
+        .app-container { max-width: 900px; margin: 0 auto; }
+
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+        .header p { color: #94a3b8; font-size: 15px; }
+
+        .nav-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 26px; }
+
+        .nav-item {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 14px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .nav-item:hover { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.3); transform: translateY(-2px); }
+        .nav-item.active { background: rgba(16,185,129,0.2); border-color: #10b981; }
+        .nav-item h3 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .nav-item p { font-size: 11px; color: #94a3b8; }
+
+        .card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .card h2 { font-size: 17px; font-weight: 600; color: #fff; margin-bottom: 14px; }
+
+        .explain { font-size: 13px; line-height: 1.7; color: #94a3b8; }
+        .explain strong { color: #e2e8f0; }
+        .explain code {
+            background: rgba(255,255,255,0.08);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .upload-area {
+            border: 2px dashed rgba(255,255,255,0.2);
+            border-radius: 12px;
+            padding: 30px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .upload-area:hover, .upload-area.drag-over { border-color: #10b981; background: rgba(16,185,129,0.06); }
+        .upload-area.has-file { border-color: #10b981; border-style: solid; }
+        .upload-icon { font-size: 32px; margin-bottom: 10px; }
+        .upload-area h3 { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 6px; }
+        .upload-area p { font-size: 12px; color: #94a3b8; }
+
+        .file-selected { display: none; align-items: center; justify-content: center; gap: 10px; }
+        .file-selected.show { display: flex; }
+        .file-selected span { font-size: 13px; color: #10b981; font-weight: 500; }
+        .file-remove {
+            background: rgba(239,68,68,0.15);
+            border: 1px solid rgba(239,68,68,0.3);
+            color: #f87171;
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .options { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+        .field label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 6px; font-weight: 500; }
+        .field input, .field select {
+            width: 100%;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.14);
+            border-radius: 8px;
+            padding: 9px 11px;
+            color: #e2e8f0;
+            font-family: inherit;
+            font-size: 13px;
+        }
+        .field input:focus, .field select:focus { outline: none; border-color: #10b981; }
+        .field small { display: block; margin-top: 5px; font-size: 11px; color: #64748b; }
+
+        .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .chip {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.14);
+            border-radius: 999px;
+            padding: 4px 11px;
+            font-size: 11px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.15s ease;
+        }
+        .chip:hover { border-color: rgba(16,185,129,0.4); }
+        .chip.on { background: rgba(16,185,129,0.2); border-color: #10b981; color: #fff; }
+
+        .actions { display: flex; gap: 12px; margin-top: 20px; }
+
+        .btn {
+            flex: 1;
+            border: none;
+            border-radius: 10px;
+            padding: 13px 18px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn-run { background: linear-gradient(135deg, #10b981, #059669); color: #fff; }
+        .btn-run:hover:not(:disabled) { transform: translateY(-1px); }
+        .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-stop { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.35); color: #f87171; flex: 0 0 120px; }
+        .btn-stop:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .progress-wrap { display: none; margin-top: 18px; }
+        .progress-wrap.show { display: block; }
+        .progress-bar { height: 8px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; }
+        .progress-fill {
+            height: 100%;
+            width: 0;
+            background: linear-gradient(90deg, #10b981, #34d399);
+            transition: width 0.3s ease;
+        }
+        .progress-text { margin-top: 7px; font-size: 12px; color: #94a3b8; text-align: right; }
+
+        .log { max-height: 340px; overflow-y: auto; }
+        .log-empty { text-align: center; padding: 26px; color: #64748b; font-size: 13px; }
+        .log-row {
+            display: flex;
+            gap: 9px;
+            padding: 7px 10px;
+            border-radius: 7px;
+            font-size: 12px;
+            line-height: 1.5;
+            border-left: 2px solid transparent;
+        }
+        .log-row + .log-row { margin-top: 3px; }
+        .log-row.info { background: rgba(255,255,255,0.03); border-left-color: #64748b; }
+        .log-row.success { background: rgba(16,185,129,0.08); border-left-color: #10b981; color: #6ee7b7; }
+        .log-row.warning { background: rgba(245,158,11,0.08); border-left-color: #f59e0b; color: #fcd34d; }
+        .log-row.error { background: rgba(239,68,68,0.09); border-left-color: #ef4444; color: #fca5a5; }
+        .log-icon { flex: 0 0 14px; font-weight: 700; }
+
+        .download {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 14px;
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: #fff;
+            text-decoration: none;
+            border-radius: 10px;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        @media (max-width: 720px) {
+            .nav-grid { grid-template-columns: repeat(2, 1fr); }
+            .options { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="app-container">
+
+    <div class="header">
+        <h1>Retail vs Marketplace</h1>
+        <p>Akak&ccedil;e'deki MediaMarkt Retail fiyat&#305; ile kendi Marketplace tekliflerimizi kar&#351;&#305;la&#351;t&#305;r&#305;r</p>
+    </div>
+
+    <div class="nav-grid">
+        <div class="nav-item" onclick="location.href='/'"><h3>Ana Sayfa</h3><p>Scraper'lar</p></div>
+        <div class="nav-item" onclick="location.href='/akakce'"><h3>Akak&ccedil;e</h3><p>Kategori</p></div>
+        <div class="nav-item" onclick="location.href='/price-index'"><h3>Price Index</h3><p>G&uuml;nl&uuml;k trend</p></div>
+        <div class="nav-item" onclick="location.href='/bulk-image'"><h3>Bulk Image</h3><p>G&ouml;rsel</p></div>
+        <div class="nav-item active"><h3>Retail vs MP</h3><p>Bu sayfa</p></div>
+    </div>
+
+    <div class="card">
+        <h2>Bu rapor ne yap&#305;yor?</h2>
+        <p class="explain">
+            Akak&ccedil;e'de listelenen <strong>MediaMarkt</strong>, MediaMarkt <strong>Retail (1P)</strong> fiyat&#305;d&#305;r.
+            Y&uuml;kledi&#287;in Offer KPI dosyas&#305;ndaki fiyatlar ise MediaMarkt <strong>Marketplace (3P)</strong>
+            sat&#305;c&#305;lar&#305;na ait. Rapor her GTIN i&ccedil;in bu ikisini kar&#351;&#305;la&#351;t&#305;r&#305;r:
+            <br><br>
+            <code>Retail vs Marketplace % = (Akak&ccedil;e Retail &minus; CSV'deki en uygun teklif) / CSV'deki en uygun teklif &times; 100</code>
+            <br><br>
+            Pozitif de&#287;er, Retail'in kendi marketplace sat&#305;c&#305;lar&#305;m&#305;zdan pahal&#305; oldu&#287;u anlam&#305;na gelir.
+            Piyasadaki en ucuz fiyat ve MediaMarkt hari&ccedil; en ucuz rakip de ba&#287;lam olarak ayr&#305; kolonlarda yer al&#305;r.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>1. Girdi dosyas&#305;</h2>
+
+        <div class="upload-area" id="uploadArea">
+            <div id="uploadPrompt">
+                <div class="upload-icon">&#x1F4C4;</div>
+                <h3>Offer KPI dosyan&#305; buraya b&#305;rak veya t&#305;kla</h3>
+                <p>CSV (.csv) veya Excel (.xlsx) &mdash; bo&#351; b&#305;rak&#305;rsan wwwroot'taki mevcut CSV kullan&#305;l&#305;r</p>
+            </div>
+            <div class="file-selected" id="fileSelected">
+                <span id="fileName"></span>
+                <button class="file-remove" onclick="removeFile(event)">Kald&#305;r</button>
+            </div>
+            <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" style="display:none">
+        </div>
+
+        <div class="options">
+            <div class="field">
+                <label for="maxProducts">&Uuml;r&uuml;n limiti (pilot)</label>
+                <input type="number" id="maxProducts" min="1" step="1" value="100" placeholder="bo&#351; = t&uuml;m&uuml;">
+                <small>Bo&#351; b&#305;rak&#305;rsan 1.815 benzersiz &uuml;r&uuml;n&uuml;n tamam&#305; taran&#305;r. &Ouml;rneklem kategorilere da&#287;&#305;t&#305;l&#305;r.</small>
+            </div>
+            <div class="field">
+                <label for="parallelism">E&#351;zamanl&#305;l&#305;k</label>
+                <input type="number" id="parallelism" min="1" max="20" step="1" value="5">
+                <small>Ayn&#305; anda ka&ccedil; &uuml;r&uuml;n taransin. Scrape.do limitlenirse d&uuml;&#351;&uuml;r.</small>
+            </div>
+            <div class="field" style="grid-column: 1 / -1">
+                <label>Tahmini s&uuml;re</label>
+                <input type="text" id="estimate" readonly>
+                <small>&Uuml;r&uuml;n ba&#351;&#305;na ~2-5 istek (arama + aday do&#287;rulama).</small>
+            </div>
+        </div>
+
+        <div class="field" style="margin-top:16px">
+            <label>Focus Category filtresi (opsiyonel)</label>
+            <div class="chips" id="categoryChips"></div>
+            <small>Hi&ccedil;biri se&ccedil;ili de&#287;ilse t&uuml;m kategoriler dahil edilir.</small>
+        </div>
+
+        <div class="actions">
+            <button class="btn btn-run" id="runBtn" onclick="run()">Raporu Olu&#351;tur</button>
+            <button class="btn btn-stop" id="stopBtn" onclick="stopRun()" disabled>Durdur</button>
+        </div>
+
+        <div class="progress-wrap" id="progressWrap">
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+            <div class="progress-text" id="progressText">0%</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>&#304;lerleme</h2>
+        <div class="log" id="log">
+            <div class="log-empty" id="logEmpty">Hen&uuml;z &ccedil;al&#305;&#351;t&#305;r&#305;lmad&#305;.</div>
+        </div>
+        <div id="downloadSlot"></div>
+    </div>
+
+</div>
+
+<script>
+    const CATEGORIES = [
+        'IT Acc.', 'SDA', 'CE Acc.', 'GSM HW', 'IT HW', 'Floor care', 'Photo', 'MDA',
+        'GSM Acc.', 'TV', 'Gaming Acc.', 'Hi-Fi', 'Smart Home', 'Household',
+        'Pet Care', 'Innovations', 'Gaming', 'Software', 'Others'
+    ];
+
+    let selectedFile = null;
+    let sessionId = null;
+    let isRunning = false;
+
+    // ---- category chips ------------------------------------------------
+    (function buildChips() {
+        const host = document.getElementById('categoryChips');
+        CATEGORIES.forEach(name => {
+            const chip = document.createElement('div');
+            chip.className = 'chip';
+            chip.textContent = name;
+            chip.dataset.value = name;
+            chip.onclick = () => chip.classList.toggle('on');
+            host.appendChild(chip);
+        });
+    })();
+
+    function selectedCategories() {
+        return Array.from(document.querySelectorAll('.chip.on')).map(c => c.dataset.value);
+    }
+
+    // ---- estimate ------------------------------------------------------
+    function updateEstimate() {
+        const raw = document.getElementById('maxProducts').value.trim();
+        const count = raw === '' ? 1815 : Math.max(1, parseInt(raw, 10) || 0);
+        const workers = Math.max(1, parseInt(document.getElementById('parallelism').value, 10) || 1);
+
+        // Measured at ~13 seconds per product on a single worker.
+        const minutes = Math.round((count * 13) / workers / 60);
+        const label = minutes >= 60
+            ? `${Math.floor(minutes / 60)} sa ${minutes % 60} dk`
+            : `${minutes} dk`;
+
+        document.getElementById('estimate').value =
+            `${count.toLocaleString('tr-TR')} ürün · ${workers} paralel · yaklaşık ${label}`;
+    }
+    document.getElementById('maxProducts').addEventListener('input', updateEstimate);
+    document.getElementById('parallelism').addEventListener('input', updateEstimate);
+    updateEstimate();
+
+    // ---- file upload ---------------------------------------------------
+    (function wireUpload() {
+        const area = document.getElementById('uploadArea');
+        const input = document.getElementById('fileInput');
+
+        area.addEventListener('click', () => input.click());
+        area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('drag-over'); });
+        area.addEventListener('dragleave', () => area.classList.remove('drag-over'));
+        area.addEventListener('drop', e => {
+            e.preventDefault();
+            area.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; handleFile(); }
+        });
+        input.addEventListener('change', handleFile);
+    })();
+
+    function handleFile() {
+        const file = document.getElementById('fileInput').files[0];
+        if (!file) return;
+        if (!/\.(csv|xlsx|xls)$/i.test(file.name)) {
+            addLog('Sadece .csv, .xlsx veya .xls dosyası yükleyebilirsin.', 'error');
+            return;
+        }
+        selectedFile = file;
+        document.getElementById('fileName').textContent =
+            `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        document.getElementById('fileSelected').classList.add('show');
+        document.getElementById('uploadPrompt').style.display = 'none';
+        document.getElementById('uploadArea').classList.add('has-file');
+    }
+
+    function removeFile(e) {
+        if (e) e.stopPropagation();
+        selectedFile = null;
+        document.getElementById('fileInput').value = '';
+        document.getElementById('fileSelected').classList.remove('show');
+        document.getElementById('uploadPrompt').style.display = 'block';
+        document.getElementById('uploadArea').classList.remove('has-file');
+    }
+
+    // ---- logging -------------------------------------------------------
+    function addLog(message, type = 'info') {
+        const log = document.getElementById('log');
+        const empty = document.getElementById('logEmpty');
+        if (empty) empty.remove();
+
+        const icons = { success: '✓', error: '✕', warning: '!', info: 'i' };
+        const row = document.createElement('div');
+        row.className = 'log-row ' + type;
+        row.innerHTML =
+            `<span class="log-icon">${icons[type] || 'i'}</span><span></span>`;
+        row.lastChild.textContent = message;
+
+        log.insertBefore(row, log.firstChild);
+    }
+
+    function setProgress(percent) {
+        document.getElementById('progressWrap').classList.add('show');
+        document.getElementById('progressFill').style.width = percent + '%';
+        document.getElementById('progressText').textContent = percent + '%';
+    }
+
+    // ---- run -----------------------------------------------------------
+    async function run() {
+        if (isRunning) return;
+
+        isRunning = true;
+        sessionId = 'rvm_' + Date.now();
+
+        document.getElementById('log').innerHTML = '';
+        document.getElementById('downloadSlot').innerHTML = '';
+        document.getElementById('runBtn').disabled = true;
+        document.getElementById('stopBtn').disabled = false;
+        setProgress(0);
+
+        addLog(selectedFile
+            ? `Başlatılıyor: ${selectedFile.name}`
+            : 'Başlatılıyor: wwwroot içindeki varsayılan CSV', 'info');
+
+        try {
+            const formData = new FormData();
+            if (selectedFile) formData.append('file', selectedFile);
+            formData.append('sessionId', sessionId);
+
+            const max = document.getElementById('maxProducts').value.trim();
+            if (max !== '') formData.append('maxProducts', max);
+
+            const workers = document.getElementById('parallelism').value.trim();
+            if (workers !== '') formData.append('parallelism', workers);
+
+            const cats = selectedCategories();
+            if (cats.length) formData.append('categories', cats.join(','));
+
+            const response = await fetch('/api/akakce/retail-vs-marketplace', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) throw new Error('Sunucu ' + response.status + ' döndü');
+
+            await consumeStream(response);
+        } catch (err) {
+            addLog('Hata: ' + err.message, 'error');
+        }
+
+        isRunning = false;
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+    }
+
+    async function consumeStream(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // SSE frames are newline delimited; keep the trailing partial line.
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+
+                let data;
+                try { data = JSON.parse(line.slice(6)); } catch { continue; }
+
+                if (typeof data.progress === 'number') setProgress(data.progress);
+
+                if (data.type === 'complete') {
+                    handleComplete(data.message);
+                } else if (data.message) {
+                    addLog(data.message, data.type || 'info');
+                }
+            }
+        }
+    }
+
+    function handleComplete(message) {
+        let payload;
+        try { payload = JSON.parse(message); } catch { return; }
+
+        if (payload.downloadUrl) {
+            const link = document.createElement('a');
+            link.className = 'download';
+            link.href = payload.downloadUrl;
+            link.download = payload.fileName || '';
+            link.textContent = 'Raporu indir (' + (payload.fileName || 'xlsx') + ')';
+            document.getElementById('downloadSlot').appendChild(link);
+            setProgress(100);
+        } else {
+            addLog('Rapor üretilmedi.', 'warning');
+        }
+    }
+
+    async function stopRun() {
+        if (!sessionId) return;
+        document.getElementById('stopBtn').disabled = true;
+        addLog('Durdurma isteği gönderildi, mevcut ürün bitince duracak...', 'warning');
+        try {
+            await fetch('/api/akakce/stop/' + sessionId, { method: 'POST' });
+        } catch (err) {
+            addLog('Durdurulamadı: ' + err.message, 'error');
+        }
+    }
+</script>
+</body>
+</html>
